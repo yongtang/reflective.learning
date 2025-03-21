@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from src.reflective_learning.tools import train, preprocess
+from src.reflective_learning.tools import train, preprocess, generate
 
 
 def main():
@@ -9,7 +9,9 @@ def main():
         description="Reflective Learning CLI Tools",
         usage="python -m src.reflective_learning.tools.main <command> [<args>]",
     )
-    parser.add_argument("command", help="Subcommand to run (train, preprocess)")
+    parser.add_argument(
+        "command", help="Subcommand to run (train, preprocess, generate)"
+    )
 
     args = parser.parse_args(sys.argv[1:2])
     if not hasattr(sys.modules[__name__], args.command):
@@ -22,6 +24,8 @@ def main():
         train.main()
     elif args.command == "preprocess":
         preprocess.main()
+    elif args.command == "generate":
+        generate.main()
 
 
 if __name__ == "__main__":
