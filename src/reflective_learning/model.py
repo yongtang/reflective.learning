@@ -77,7 +77,7 @@ class ReflectiveTransformer(nn.Module):
         batch_size, seq_len = token_targets.shape
 
         # Flatten inputs
-        logits = logits.view(
+        logits = logits.reshape(
             batch_size * seq_len, -1
         )  # (B * L, vocab_size * state_size)
         joint_targets = (
