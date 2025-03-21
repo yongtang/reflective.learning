@@ -25,13 +25,13 @@ def sample_sequence(
         model: ReflectiveTransformer
         state_weights: dict mapping state index -> float (weights must sum to 1)
         start_token: initial token (usually 0)
-        max_len: max number of tokens to generate
+        max_len: max number of tokens to generate (including start and stop)
         temperature: softmax temperature
         stop_token: token that ends the sequence
         device: device to run model on
 
     Returns:
-        List[int]: the sampled token sequence (including stop_token)
+        List[int]: the sampled token sequence (including stop_token if generated)
     """
     model.eval()
     state_weights = normalize_distribution(state_weights)
@@ -39,7 +39,7 @@ def sample_sequence(
 
     tokens = [start_token]
     with torch.no_grad():
-        for _ in range(max_len):
+        while len(tokens) < max_len:
             token_tensor = torch.tensor([tokens], dtype=torch.long, device=device)
             state_tensor = torch.tensor(
                 [[s] * len(tokens) for s in state_indices],

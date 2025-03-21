@@ -46,4 +46,8 @@ def test_sample_multiple_sequences(tmp_path):
     for seq in sequences:
         assert isinstance(seq, list)
         assert all(isinstance(t, int) for t in seq)
-        assert seq[-1] == 0 or len(seq) == max_seq_len
+        # Ensure the STOP token ends the sequence, or we hit max_len with no STOP
+        if seq[-1] == 0:
+            assert len(seq) <= max_seq_len
+        else:
+            assert len(seq) == max_seq_len
