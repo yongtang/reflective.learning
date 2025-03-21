@@ -3,13 +3,21 @@ name = "reflective-learning"
 version = "0.1.0"
 description = "Reflective Learning"
 license = "Apache-2.0"
+requires-python = ">=3.8"
+
 dependencies = [
     "torch"
 ]
-requires-python = ">=3.8"
 
 [project.optional-dependencies]
-dev = ["pytest"]
+test = [
+    "pytest",
+    "tiktoken",
+    "transformers",
+    "huggingface_hub",
+    "requests",
+    "tqdm"
+]
 
 [build-system]
 requires = ["setuptools>=61"]

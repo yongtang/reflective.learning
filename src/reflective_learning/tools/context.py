@@ -33,6 +33,19 @@ def convert_context(
     gpt2.eval()
     torch.save(gpt2.state_dict(), os.path.join(output_dir, "text_weights.pt"))
 
+    print(f"⚙️  Saving GPT-2 vocab and merges for tokenizer-free usage")
+    print(f"⚙️  Extracting tokenizer vocab/merges using backend_tokenizer")
+    tokenizer.backend_tokenizer.model.save(output_dir)
+
+    os.rename(
+        os.path.join(output_dir, "vocab.json"),
+        os.path.join(output_dir, "text_vocab.json"),
+    )
+    os.rename(
+        os.path.join(output_dir, "merges.txt"),
+        os.path.join(output_dir, "text_merges.txt"),
+    )
+
     print(f"⚙️  Loading ViT model: {vit_model}")
     vit = ViTModel.from_pretrained(vit_model)
     vit.eval()
@@ -44,6 +57,8 @@ def convert_context(
         "text_encoder": {
             "model_name": gpt2_model,
             "weights_file": "text_weights.pt",
+            "vocab_file": "text_vocab.json",
+            "merges_file": "text_merges.txt",
         },
         "image_encoder": {
             "model_name": vit_model,
@@ -51,7 +66,12 @@ def convert_context(
         },
     }
 
-    for name in ["text_weights.pt", "image_weights.pt"]:
+    for name in [
+        "text_weights.pt",
+        "image_weights.pt",
+        "text_vocab.json",
+        "text_merges.txt",
+    ]:
         path = os.path.join(output_dir, name)
         if os.path.exists(path):
             metadata.setdefault("hashes", {})[name] = sha256sum(path)
@@ -123,24 +143,24 @@ def validate_context_upload(context_dir, repo_id):
 def main():
     parser = argparse.ArgumentParser(
         description="Context encoder tools for exporting, tokenizing, and uploading GPT-2 and ViT encoders.",
-        epilog="""\
+        epilog="""
 Examples:
 
   # Convert and tokenize context data
-  python tools/context.py convert \\
-    --output-dir checkpoints/context \\
-    --input-json data/raw_context.json \\
+  python tools/context.py convert \
+    --output-dir checkpoints/context \
+    --input-json data/raw_context.json \
     --output-json data/tokenized_context.json
 
   # Upload to Hugging Face
-  python tools/context.py upload \\
-    --context-dir checkpoints/context \\
-    --repo-id yourname/reflective-context \\
+  python tools/context.py upload \
+    --context-dir checkpoints/context \
+    --repo-id yourname/reflective-context \
     --token $HF_TOKEN
 
   # Validate uploaded files
-  python tools/context.py validate \\
-    --context-dir checkpoints/context \\
+  python tools/context.py validate \
+    --context-dir checkpoints/context \
     --repo-id yourname/reflective-context
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
