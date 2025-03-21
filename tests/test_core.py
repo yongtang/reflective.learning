@@ -1,6 +1,6 @@
 import torch
 import pytest
-from reflective_learning.model import ReflectiveTransformer
+from reflective_learning.model import ReflectiveCore
 
 
 def test_reflective_transformer_forward_and_loss():
@@ -9,7 +9,7 @@ def test_reflective_transformer_forward_and_loss():
     seq_len = 8
     batch_size = 2
 
-    model = ReflectiveTransformer(
+    model = ReflectiveCore(
         vocab_size=vocab_size,
         state_size=state_size,
         d_model=64,

@@ -1,13 +1,13 @@
 import argparse
 import json
 import torch
-from src.reflective_learning.model import ReflectiveTransformer
+from src.reflective_learning.model import ReflectiveCore
 from src.reflective_learning.inference import sample_multiple_sequences
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate sequences using a trained ReflectiveTransformer."
+        description="Generate sequences using a trained ReflectiveCore."
     )
     parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
     parser.add_argument("--vocab-size", type=int, required=True, help="Vocabulary size")
@@ -56,7 +56,7 @@ def main():
         args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
 
-    model = ReflectiveTransformer(
+    model = ReflectiveCore(
         vocab_size=args.vocab_size,
         state_size=args.state_size,
         max_seq_len=args.max_seq_len,

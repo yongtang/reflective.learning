@@ -1,7 +1,7 @@
 import torch
 import json
 from pathlib import Path
-from src.reflective_learning.model import ReflectiveTransformer
+from src.reflective_learning.model import ReflectiveCore
 from src.reflective_learning.inference import sample_multiple_sequences
 
 
@@ -11,7 +11,7 @@ def test_sample_multiple_sequences(tmp_path):
     state_size = 2
     max_seq_len = 10
 
-    model = ReflectiveTransformer(
+    model = ReflectiveCore(
         vocab_size=vocab_size,
         state_size=state_size,
         max_seq_len=max_seq_len,

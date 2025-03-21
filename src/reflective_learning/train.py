@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from src.reflective_learning.dataset import ReflectiveDataset
-from src.reflective_learning.model import ReflectiveTransformer
+from src.reflective_learning.model import ReflectiveCore
 import os
 
 
@@ -23,7 +23,7 @@ def train(
     dim_ff=3072,
 ):
     """
-    Trains a ReflectiveTransformer model on the provided dataset.
+    Trains a ReflectiveCore model on the provided dataset.
 
     Args:
         json_paths (str or list): One or more paths to JSONL dataset files.
@@ -45,7 +45,7 @@ def train(
     dataset = ReflectiveDataset(json_paths, max_seq_len=max_seq_len)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    model = ReflectiveTransformer(
+    model = ReflectiveCore(
         vocab_size=vocab_size,
         state_size=state_size,
         max_seq_len=max_seq_len,

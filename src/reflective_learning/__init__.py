@@ -1,1 +1,1 @@
-from .model import ReflectiveTransformer
+from .model import ReflectiveCore

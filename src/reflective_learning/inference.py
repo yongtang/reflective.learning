@@ -22,7 +22,7 @@ def sample_sequence(
     Generate a single sequence using state-weighted sampling.
 
     Args:
-        model: ReflectiveTransformer
+        model: ReflectiveCore
         state_weights: dict mapping state index -> float (weights must sum to 1)
         start_token: initial token (usually 0)
         max_len: max number of tokens to generate (including start and stop)

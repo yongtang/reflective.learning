@@ -7,9 +7,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Train
-    train_parser = subparsers.add_parser(
-        "train", help="Train a ReflectiveTransformer model"
-    )
+    train_parser = subparsers.add_parser("train", help="Train a ReflectiveCore model")
     train_parser.set_defaults(func=train.main)
 
     # Preprocess

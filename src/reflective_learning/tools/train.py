@@ -3,7 +3,7 @@ from src.reflective_learning.train import train
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train a ReflectiveTransformer model.")
+    parser = argparse.ArgumentParser(description="Train a ReflectiveCore model.")
     parser.add_argument(
         "--input",
         nargs="+",
