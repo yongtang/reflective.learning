@@ -71,7 +71,10 @@ def upload_context_to_hf(context_dir, repo_id, hf_token):
         path = os.path.join(context_dir, f)
         print(f"  ⬆️  Uploading: {f}")
         api.upload_file(
-            path_or_fileobj=path, path_in_repo=f, repo_id=repo_id, token=hf_token
+            path_or_fileobj=path,
+            path_in_repo=f"context/{f}",
+            repo_id=repo_id,
+            token=hf_token,
         )
 
     print("✅ Upload complete.")
@@ -85,7 +88,7 @@ def validate_context_upload(context_dir, repo_id):
 
     print("🔍 Validating uploaded files:")
     for fname, local_hash in meta.get("hashes", {}).items():
-        url = f"{base_url}/{fname}"
+        url = f"{base_url}/context/{fname}"
         print(f"  🌐 Checking {url} ... ", end="")
         try:
             resp = requests.get(url)
@@ -103,29 +106,77 @@ def validate_context_upload(context_dir, repo_id):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Context encoder tools (convert, upload, validate)"
+        description="Context encoder tools for exporting and uploading GPT-2 and ViT encoders.",
+        epilog="""\
+Example usage:
+
+  # Convert and export GPT-2 and ViT encoders
+  python -m src.reflective_learning.tools.context convert \\
+    --output-dir checkpoints/context
+
+  # Upload context folder to Hugging Face Hub
+  python -m src.reflective_learning.tools.context upload \\
+    --context-dir checkpoints/context \\
+    --repo-id yourname/reflective-context \\
+    --token $HF_TOKEN
+
+  # Validate uploaded files against local SHA256
+  python -m src.reflective_learning.tools.context validate \\
+    --context-dir checkpoints/context \\
+    --repo-id yourname/reflective-context
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    # Convert command
     convert_parser = subparsers.add_parser(
-        "convert", help="Convert HF GPT-2 and ViT to PyTorch .pt"
+        "convert",
+        help="Convert HF GPT-2 and ViT models into PyTorch .pt files under a context directory.",
     )
-    convert_parser.add_argument("--output-dir", required=True)
-    convert_parser.add_argument("--gpt2-model", default="gpt2")
-    convert_parser.add_argument("--vit-model", default="google/vit-base-patch16-224")
+    convert_parser.add_argument(
+        "--output-dir", required=True, help="Directory to save .pt and metadata files"
+    )
+    convert_parser.add_argument(
+        "--gpt2-model", default="gpt2", help="Hugging Face GPT-2 model ID or path"
+    )
+    convert_parser.add_argument(
+        "--vit-model",
+        default="google/vit-base-patch16-224",
+        help="Hugging Face ViT model ID or path",
+    )
 
+    # Upload command
     upload_parser = subparsers.add_parser(
-        "upload", help="Upload context folder to Hugging Face Hub"
+        "upload",
+        help="Upload the context directory to Hugging Face model repo",
     )
-    upload_parser.add_argument("--context-dir", required=True)
-    upload_parser.add_argument("--repo-id", required=True)
-    upload_parser.add_argument("--token", required=True)
+    upload_parser.add_argument(
+        "--context-dir", required=True, help="Path to the context/ folder"
+    )
+    upload_parser.add_argument(
+        "--repo-id",
+        required=True,
+        help="Hugging Face model repo ID (e.g., username/repo)",
+    )
+    upload_parser.add_argument(
+        "--token", required=True, help="Hugging Face token for authentication"
+    )
 
+    # Validate command
     validate_parser = subparsers.add_parser(
-        "validate", help="Validate SHA256 of uploaded files"
+        "validate",
+        help="Validate uploaded files on Hugging Face match local SHA256 hashes",
     )
-    validate_parser.add_argument("--context-dir", required=True)
-    validate_parser.add_argument("--repo-id", required=True)
+    validate_parser.add_argument(
+        "--context-dir", required=True, help="Local context/ folder path"
+    )
+    validate_parser.add_argument(
+        "--repo-id",
+        required=True,
+        help="Hugging Face model repo ID (e.g., username/repo)",
+    )
 
     args = parser.parse_args()
 
