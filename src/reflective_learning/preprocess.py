@@ -1,5 +1,8 @@
 import json
 import argparse
+import os
+
+from .encoder import ContextEncoder
 
 
 def build_mapping_from_list(items):
@@ -39,15 +42,32 @@ def validate_mapping(mapping, name):
         )
 
 
-def preprocess_textual_json(input_path, output_path, vocab_map, state_map):
+def preprocess_textual_json(
+    input_path, output_path, vocab_map, state_map, context_encoder=None
+):
     with open(input_path, "r") as fin, open(output_path, "w") as fout:
         for line_num, line in enumerate(fin, 1):
             try:
                 example = json.loads(line)
                 token_ids = [vocab_map[token] for token in example["token"]]
                 state_id = state_map[example["state"]]
-                json.dump({"token": token_ids, "state": state_id}, fout)
+                output = {"token": token_ids, "state": state_id}
+
+                if context_encoder:
+                    if "text" not in example or "image" not in example:
+                        raise ValueError(
+                            f"Line {line_num}: Missing 'text' or 'image' fields when context is enabled."
+                        )
+
+                    text_ids = example["text"]
+                    image_path = example["image"]
+
+                    prefix = context_encoder.encode(text_ids, image_path)
+                    output["prefix"] = prefix.tolist()
+
+                json.dump(output, fout)
                 fout.write("\n")
+
             except KeyError as e:
                 raise KeyError(
                     f"Line {line_num}: Missing mapping for {e} in vocab/state."
@@ -60,12 +80,16 @@ def main(argv=None):
         epilog="""\
 Example:
   # Provide vocab/state inline
-  python3 preprocess.py --input in.json --output out.json \
+  python3 preprocess.py --input in.json --output out.json \\
     --vocab X1 X2 X3 --state S1 S2 --save-mappings mapping.json
 
   # Load from a pre-defined mapping file
-  python3 preprocess.py --input in.json --output out.json \
+  python3 preprocess.py --input in.json --output out.json \\
     --load-mappings mapping.json
+
+  # With context encoding (text/image)
+  python3 preprocess.py --input in.json --output out.json \\
+    --load-mappings mapping.json --context-dir checkpoints/context --device cuda
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -84,6 +108,14 @@ Example:
     parser.add_argument(
         "--load-mappings", help="Optional path to load combined mapping JSON"
     )
+    parser.add_argument(
+        "--context-dir", help="Optional directory containing frozen context encoders"
+    )
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        help="Device for context encoder (e.g. cpu, cuda, cuda:0)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -100,7 +132,15 @@ Example:
     validate_mapping(vocab_map, "vocab")
     validate_mapping(state_map, "state")
 
-    preprocess_textual_json(args.input, args.output, vocab_map, state_map)
+    context_encoder = None
+    if args.context_dir:
+        context_encoder = ContextEncoder.load(args.context_dir, device=args.device)
+        context_encoder.eval()
+        context_encoder.requires_grad_(False)
+
+    preprocess_textual_json(
+        args.input, args.output, vocab_map, state_map, context_encoder
+    )
 
     if args.save_mappings:
         save_mappings(vocab_map, state_map, args.save_mappings)
