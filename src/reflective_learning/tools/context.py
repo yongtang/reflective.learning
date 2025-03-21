@@ -4,6 +4,7 @@ import json
 import hashlib
 import torch
 import requests
+from tqdm import tqdm
 from transformers import AutoTokenizer, GPT2Model, ViTModel
 from huggingface_hub import HfApi
 
@@ -16,36 +17,41 @@ def sha256sum(path):
     return h.hexdigest()
 
 
-def convert_context_encoders(
-    output_dir, gpt2_model="gpt2", vit_model="google/vit-base-patch16-224"
+def convert_context(
+    output_dir,
+    input_json=None,
+    output_json=None,
+    gpt2_model="gpt2",
+    vit_model="google/vit-base-patch16-224",
+    text_field="text",
 ):
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"⚙️  Loading GPT-2 from: {gpt2_model}")
-    gpt2_tokenizer = AutoTokenizer.from_pretrained(gpt2_model)
+    print(f"⚙️  Loading GPT-2 model: {gpt2_model}")
+    tokenizer = AutoTokenizer.from_pretrained(gpt2_model)
     gpt2 = GPT2Model.from_pretrained(gpt2_model)
     gpt2.eval()
     torch.save(gpt2.state_dict(), os.path.join(output_dir, "text_weights.pt"))
-    gpt2_tokenizer.save_pretrained(output_dir)
 
-    print(f"⚙️  Loading ViT from: {vit_model}")
+    print(f"⚙️  Loading ViT model: {vit_model}")
     vit = ViTModel.from_pretrained(vit_model)
     vit.eval()
     torch.save(vit.state_dict(), os.path.join(output_dir, "image_weights.pt"))
 
     metadata = {
-        "transformers_version": torch.hub._get_torch_home(),  # optional version tracking
+        "transformers_version": torch.__version__,
         "torch_version": torch.__version__,
         "text_encoder": {
             "model_name": gpt2_model,
             "weights_file": "text_weights.pt",
-            "tokenizer_file": "text_tokenizer.json",
         },
-        "image_encoder": {"model_name": vit_model, "weights_file": "image_weights.pt"},
+        "image_encoder": {
+            "model_name": vit_model,
+            "weights_file": "image_weights.pt",
+        },
     }
 
-    # Add SHA256 for each file
-    for name in ["text_weights.pt", "image_weights.pt", "tokenizer_config.json"]:
+    for name in ["text_weights.pt", "image_weights.pt"]:
         path = os.path.join(output_dir, name)
         if os.path.exists(path):
             metadata.setdefault("hashes", {})[name] = sha256sum(path)
@@ -53,7 +59,17 @@ def convert_context_encoders(
     with open(os.path.join(output_dir, "context_versions.json"), "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print("✅ Conversion complete. Files saved to:", output_dir)
+    if input_json and output_json:
+        print(f"📝 Tokenizing text from {input_json} → {output_json}")
+        with open(input_json, "r") as f_in, open(output_json, "w") as f_out:
+            for line in tqdm(f_in, desc="Tokenizing"):
+                record = json.loads(line)
+                text = record.get(text_field, "")
+                token_ids = tokenizer.encode(text, add_special_tokens=False)
+                record["text_tokens"] = token_ids
+                f_out.write(json.dumps(record) + "\n")
+
+    print("✅ Context conversion complete.")
 
 
 def upload_context_to_hf(context_dir, repo_id, hf_token):
@@ -64,7 +80,7 @@ def upload_context_to_hf(context_dir, repo_id, hf_token):
         if os.path.isfile(os.path.join(context_dir, f))
     ]
 
-    print(f"📤 Uploading to {repo_id}...")
+    print(f"📤 Uploading context files to {repo_id}...")
     api.create_repo(repo_id, token=hf_token, exist_ok=True)
 
     for f in files:
@@ -106,37 +122,44 @@ def validate_context_upload(context_dir, repo_id):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Context encoder tools for exporting and uploading GPT-2 and ViT encoders.",
+        description="Context encoder tools for exporting, tokenizing, and uploading GPT-2 and ViT encoders.",
         epilog="""\
-Example usage:
+Examples:
 
-  # Convert and export GPT-2 and ViT encoders
-  python -m src.reflective_learning.tools.context convert \\
-    --output-dir checkpoints/context
+  # Convert and tokenize context data
+  python tools/context.py convert \\
+    --output-dir checkpoints/context \\
+    --input-json data/raw_context.json \\
+    --output-json data/tokenized_context.json
 
-  # Upload context folder to Hugging Face Hub
-  python -m src.reflective_learning.tools.context upload \\
+  # Upload to Hugging Face
+  python tools/context.py upload \\
     --context-dir checkpoints/context \\
     --repo-id yourname/reflective-context \\
     --token $HF_TOKEN
 
-  # Validate uploaded files against local SHA256
-  python -m src.reflective_learning.tools.context validate \\
+  # Validate uploaded files
+  python tools/context.py validate \\
     --context-dir checkpoints/context \\
     --repo-id yourname/reflective-context
-        """,
+""",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Convert command
     convert_parser = subparsers.add_parser(
         "convert",
-        help="Convert HF GPT-2 and ViT models into PyTorch .pt files under a context directory.",
+        help="Convert HF GPT-2 and ViT models to .pt and tokenize context JSON.",
     )
     convert_parser.add_argument(
-        "--output-dir", required=True, help="Directory to save .pt and metadata files"
+        "--output-dir", required=True, help="Directory to save weights and metadata"
+    )
+    convert_parser.add_argument(
+        "--input-json", help="Path to line-separated JSON with raw context data"
+    )
+    convert_parser.add_argument(
+        "--output-json", help="Path to write updated context with text_tokens"
     )
     convert_parser.add_argument(
         "--gpt2-model", default="gpt2", help="Hugging Face GPT-2 model ID or path"
@@ -146,42 +169,34 @@ Example usage:
         default="google/vit-base-patch16-224",
         help="Hugging Face ViT model ID or path",
     )
+    convert_parser.add_argument(
+        "--text-field", default="text", help="Name of the text field to tokenize"
+    )
 
-    # Upload command
     upload_parser = subparsers.add_parser(
-        "upload",
-        help="Upload the context directory to Hugging Face model repo",
+        "upload", help="Upload context directory to Hugging Face Hub"
     )
-    upload_parser.add_argument(
-        "--context-dir", required=True, help="Path to the context/ folder"
-    )
-    upload_parser.add_argument(
-        "--repo-id",
-        required=True,
-        help="Hugging Face model repo ID (e.g., username/repo)",
-    )
-    upload_parser.add_argument(
-        "--token", required=True, help="Hugging Face token for authentication"
-    )
+    upload_parser.add_argument("--context-dir", required=True)
+    upload_parser.add_argument("--repo-id", required=True)
+    upload_parser.add_argument("--token", required=True)
 
-    # Validate command
     validate_parser = subparsers.add_parser(
-        "validate",
-        help="Validate uploaded files on Hugging Face match local SHA256 hashes",
+        "validate", help="Validate uploaded files against SHA256 hash"
     )
-    validate_parser.add_argument(
-        "--context-dir", required=True, help="Local context/ folder path"
-    )
-    validate_parser.add_argument(
-        "--repo-id",
-        required=True,
-        help="Hugging Face model repo ID (e.g., username/repo)",
-    )
+    validate_parser.add_argument("--context-dir", required=True)
+    validate_parser.add_argument("--repo-id", required=True)
 
     args = parser.parse_args()
 
     if args.command == "convert":
-        convert_context_encoders(args.output_dir, args.gpt2_model, args.vit_model)
+        convert_context(
+            output_dir=args.output_dir,
+            input_json=args.input_json,
+            output_json=args.output_json,
+            gpt2_model=args.gpt2_model,
+            vit_model=args.vit_model,
+            text_field=args.text_field,
+        )
     elif args.command == "upload":
         upload_context_to_hf(args.context_dir, args.repo_id, args.token)
     elif args.command == "validate":

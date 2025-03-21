@@ -6,7 +6,13 @@ from src.reflective_learning.tools import context
 
 def test_convert_context_encoders_runs():
     with tempfile.TemporaryDirectory() as tmpdir:
-        context.convert_context_encoders(tmpdir)
+        context.convert_context(
+            output_dir=tmpdir,
+            input_json=None,
+            output_json=None,
+            gpt2_model="gpt2",
+            vit_model="google/vit-base-patch16-224",
+        )
 
         # Check core output files exist
         text_weights = f"{tmpdir}/text_weights.pt"
