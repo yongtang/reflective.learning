@@ -1,32 +1,34 @@
 import argparse
-import sys
-
-from src.reflective_learning.tools import train, preprocess, generate
+from src.reflective_learning.tools import train, preprocess, generate, postprocess
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Reflective Learning CLI Tools",
-        usage="python -m src.reflective_learning.tools.main <command> [<args>]",
+    parser = argparse.ArgumentParser(description="Reflective Learning CLI Toolkit")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Train
+    train_parser = subparsers.add_parser(
+        "train", help="Train a ReflectiveTransformer model"
     )
-    parser.add_argument(
-        "command", help="Subcommand to run (train, preprocess, generate)"
+    train_parser.set_defaults(func=train.main)
+
+    # Preprocess
+    preprocess_parser = subparsers.add_parser(
+        "preprocess", help="Convert textual tokens to numerical format"
     )
+    preprocess_parser.set_defaults(func=preprocess.main)
 
-    args = parser.parse_args(sys.argv[1:2])
-    if not hasattr(sys.modules[__name__], args.command):
-        print(f"Unknown command: {args.command}")
-        parser.print_help()
-        exit(1)
+    # Generate
+    generate_parser = subparsers.add_parser(
+        "generate", help="Sample sequences from a trained model"
+    )
+    generate_parser.set_defaults(func=generate.main)
 
-    # Dispatch to the appropriate CLI tool
-    if args.command == "train":
-        train.main()
-    elif args.command == "preprocess":
-        preprocess.main()
-    elif args.command == "generate":
-        generate.main()
+    # Postprocess
+    postprocess_parser = subparsers.add_parser(
+        "postprocess", help="Convert numeric output back to readable text"
+    )
+    postprocess_parser.set_defaults(func=postprocess.main)
 
-
-if __name__ == "__main__":
-    main()
+    args = parser.parse_args()
+    args.func()
