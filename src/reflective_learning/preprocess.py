@@ -54,17 +54,17 @@ def preprocess_textual_json(input_path, output_path, vocab_map, state_map):
                 ) from e
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Preprocess textual token/state JSON to numeric format.",
         epilog="""\
 Example:
   # Provide vocab/state inline
-  python3 preprocess.py --input in.json --output out.json \\
+  python3 preprocess.py --input in.json --output out.json \
     --vocab X1 X2 X3 --state S1 S2 --save-mappings mapping.json
 
   # Load from a pre-defined mapping file
-  python3 preprocess.py --input in.json --output out.json \\
+  python3 preprocess.py --input in.json --output out.json \
     --load-mappings mapping.json
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -85,7 +85,7 @@ Example:
         "--load-mappings", help="Optional path to load combined mapping JSON"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.load_mappings:
         vocab_map, state_map = load_mappings(args.load_mappings)
