@@ -1,5 +1,7 @@
+import base64
 import json
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -66,3 +68,32 @@ def test_multiple_files_combined(tmp_path):
     tokens = item["token_ids"]
     states = item["state_ids"]
     assert tokens.shape == states.shape == torch.Size([4])
+
+
+def test_variable_length_prefix_decoding(tmp_path):
+    def encode_prefix(array: np.ndarray) -> str:
+        return base64.b64encode(array.astype(np.float32).tobytes()).decode("utf-8")
+
+    d_model = 32
+    context_len = 3  # variable length
+    prefix_array = np.random.rand(context_len, d_model).astype(np.float32)
+
+    data = [
+        {
+            "token": [1, 2, 3],
+            "state": 0,
+            "prefix": encode_prefix(prefix_array),
+        }
+    ]
+
+    dataset_path = tmp_path / "prefix.json"
+    create_test_file(dataset_path, data)
+
+    dataset = ReflectiveDataset(str(dataset_path), max_seq_len=5, d_model=d_model)
+    item = dataset[0]
+
+    prefix = item["prefix"]
+    assert isinstance(prefix, torch.Tensor)
+    assert prefix.shape == (context_len, d_model)
+    assert prefix.dtype == torch.float32
+    assert torch.allclose(prefix, torch.tensor(prefix_array), atol=1e-6)

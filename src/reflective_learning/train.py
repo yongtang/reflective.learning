@@ -74,12 +74,20 @@ def train(
             if prefix.ndim == 2:
                 prefix = prefix.unsqueeze(0).expand(token_ids.size(0), -1, -1)
 
+            # Forward pass
             logits = model(token_ids, state_ids, prefix=prefix)
 
-            # Shift for autoregressive prediction
+            # Determine token length and prefix length
+            T = token_ids.size(1)
+            L = logits.size(1)  # should be C + T
+            prefix_len = L - T
+
+            # Shift targets for next-token prediction
             token_target = token_ids[:, 1:]
             state_target = state_ids[:, 1:]
-            logits = logits[:, :-1, :, :]
+
+            # Remove prefix and final step for prediction
+            logits = logits[:, prefix_len:-1, :, :]  # align with shifted target
 
             loss = model.loss(logits, token_target, state_target)
 

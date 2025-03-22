@@ -6,15 +6,28 @@ import torch.nn.functional as F
 class ReflectiveCore(nn.Module):
     def __init__(
         self,
-        vocab_size,
-        state_size,
-        d_model=768,
-        nhead=12,
-        dim_feedforward=3072,
-        dropout=0.1,
-        num_layers=12,
-        max_seq_len=1024,
+        vocab_size: int,
+        state_size: int,
+        d_model: int = 768,
+        nhead: int = 12,
+        dim_feedforward: int = 3072,
+        dropout: float = 0.1,
+        num_layers: int = 12,
+        max_seq_len: int = 1024,
     ):
+        """
+        Initializes the ReflectiveCore Transformer model.
+
+        Args:
+            vocab_size (int): Size of the vocabulary (number of tokens).
+            state_size (int): Number of mutually exclusive state classes.
+            d_model (int): Transformer embedding dimension.
+            nhead (int): Number of attention heads.
+            dim_feedforward (int): Dimension of the feedforward network.
+            dropout (float): Dropout probability.
+            num_layers (int): Number of transformer decoder layers.
+            max_seq_len (int): Maximum sequence length for positional embeddings.
+        """
         super().__init__()
 
         self.vocab_size = vocab_size
@@ -23,7 +36,6 @@ class ReflectiveCore(nn.Module):
 
         self.input_linear = nn.Linear(vocab_size * state_size, d_model)
         self.output_linear = nn.Linear(d_model, vocab_size * state_size)
-
         self.pos_embedding = nn.Embedding(max_seq_len + 512, d_model)
 
         decoder_layer = nn.TransformerDecoderLayer(
@@ -35,69 +47,77 @@ class ReflectiveCore(nn.Module):
         )
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
 
-    def forward(self, token_ids, state_ids, prefix=None, mask=None):
+    def forward(
+        self,
+        token_ids: torch.Tensor,
+        state_ids: torch.Tensor,
+        prefix: torch.Tensor = None,
+        mask: torch.Tensor = None,
+    ) -> torch.Tensor:
         """
+        Standard forward interface that takes token and state IDs and optional prefix embeddings.
+
         Args:
-            token_ids: [B, T] LongTensor of token indices
-            state_ids: [B, T] LongTensor of state indices
-            prefix: Optional [B, C, d_model] float tensor of context prefix embeddings
-            mask: Optional [T+C, T+C] causal mask
+            token_ids (Tensor): [B, T] LongTensor of token indices.
+            state_ids (Tensor): [B, T] LongTensor of state indices.
+            prefix (Tensor, optional): [B, C, d_model] context prefix embeddings.
+            mask (Tensor, optional): [L, L] or [B, L, L] causal attention mask.
 
         Returns:
-            logits: [B, T, V, S] output logits over (token, state) pairs
+            Tensor: [B, T, vocab_size, state_size] output logits.
         """
         B, T = token_ids.shape
         V, S = self.vocab_size, self.state_size
 
-        # Build one-hot input distribution over (token, state) pairs
         x = torch.zeros(B, T, V, S, device=token_ids.device)
         x.scatter_(2, token_ids.unsqueeze(-1).unsqueeze(-1), 1.0)
         x.scatter_(3, state_ids.unsqueeze(-1).unsqueeze(-2), 1.0)
 
-        # Flatten (V * S) → project into d_model
         x = x.view(B, T, V * S)
         x = self.input_linear(x)  # [B, T, d_model]
 
-        # Prepend prefix if available
         if prefix is not None:
-            C = prefix.shape[1]
             x = torch.cat([prefix, x], dim=1)  # [B, C+T, d_model]
-        else:
-            C = 0
 
-        total_len = C + T
-        pos = torch.arange(total_len, device=x.device).unsqueeze(0).expand(B, -1)
-        x = x + self.pos_embedding(pos)
+        return self.call(x, mask=mask)
 
-        if mask is None:
-            mask = torch.triu(
-                torch.ones(total_len, total_len, device=x.device), diagonal=1
-            )
-            mask = mask.masked_fill(mask == 1, float("-inf"))
+    def call(self, embed: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+        """
+        Forward pass for pre-embedded inputs.
 
-        x = self.decoder(x, x, tgt_mask=mask)  # [B, C+T, d_model]
-        x = x[:, C:]  # remove prefix portion
+        Args:
+            embed (Tensor): [B, L, d_model] input embeddings (prefix + token sequence).
+            mask (Tensor, optional): [L, L] or [B, L, L] attention mask. Defaults to None.
 
-        logits = self.output_linear(x)  # [B, T, V*S]
-        logits = logits.view(B, T, V, S)
-        return logits
+        Returns:
+            Tensor: [B, L, vocab_size, state_size] output logits.
+        """
+        B, L, _ = embed.shape
+        pos_ids = torch.arange(L, device=embed.device).unsqueeze(0).expand(B, -1)
+        x = embed + self.pos_embedding(pos_ids)
 
-    def loss(self, logits, token_ids, state_ids):
+        x = self.decoder(x, x, tgt_mask=mask)  # [B, L, d_model]
+        logits = self.output_linear(x)
+        return logits.view(B, L, self.vocab_size, self.state_size)
+
+    def loss(
+        self,
+        logits: torch.Tensor,
+        token_ids: torch.Tensor,
+        state_ids: torch.Tensor,
+    ) -> torch.Tensor:
         """
         Computes training loss using one-hot supervision.
 
         Args:
-            logits: Tensor [B, T, V, S] – model outputs
-            token_ids: Tensor [B, T] – ground truth token indices
-            state_ids: Tensor [B, T] – ground truth state indices
+            logits (Tensor): [B, T, vocab_size, state_size] model outputs.
+            token_ids (Tensor): [B, T] ground truth token indices.
+            state_ids (Tensor): [B, T] ground truth state indices.
 
         Returns:
-            Scalar loss
+            Tensor: Scalar loss value (cross entropy).
         """
         B, T, V, S = logits.shape
         logits_flat = logits.reshape(B * T, V * S)
-
-        # Linearize (token, state) index
-        linear_target = state_ids * V + token_ids  # [B, T]
-        loss = F.cross_entropy(logits_flat, linear_target.view(-1))
-        return loss
+        linear_target = state_ids * V + token_ids
+        return F.cross_entropy(logits_flat, linear_target.view(-1))
