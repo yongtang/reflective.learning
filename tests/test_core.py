@@ -1,5 +1,6 @@
-import torch
 import pytest
+import torch
+
 from reflective_learning.model import ReflectiveCore
 
 

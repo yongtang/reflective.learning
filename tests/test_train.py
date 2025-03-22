@@ -1,6 +1,8 @@
 import json
-import torch
 from pathlib import Path
+
+import torch
+
 from src.reflective_learning.train import train
 
 

@@ -1,75 +1,70 @@
-import torch
 import pytest
-from unittest.mock import patch
-from src.reflective_learning.encoder import ContextEncoder
+import torch
+
+from src.reflective_learning.tools.encoder import ContextEncoder
 
 
-class DummyTextEncoder(torch.nn.Module):
-    def __init__(self, embedding_dim=4):
-        super().__init__()
-        self.embedding_dim = embedding_dim
-        self._dummy_param = torch.nn.Parameter(torch.zeros(1))  # avoid StopIteration
-
-    def forward(self, x):
-        return x.mean(dim=1, keepdim=True)
-
-    def embed_text(self, text_ids):
-        return torch.tensor([float(len(text_ids))] * self.embedding_dim)
+class DummyTokenizer:
+    def __call__(self, text, return_tensors=None, truncation=None):
+        return {"input_ids": torch.tensor([[1, 2, 3]])}
 
 
-class DummyImageEncoder(torch.nn.Module):
-    def __init__(self, embedding_dim=6):
-        super().__init__()
-        self.embedding_dim = embedding_dim
-        self._dummy_param = torch.nn.Parameter(torch.zeros(1))  # avoid StopIteration
+class DummyTextModel(torch.nn.Module):
+    def forward(self, input_ids):
+        batch_size = input_ids.size(0)
+        seq_len = input_ids.size(1)
+        return type(
+            "Output", (), {"last_hidden_state": torch.ones((batch_size, seq_len, 4))}
+        )
 
-    def forward(self, x):
-        return torch.ones((1, self.embedding_dim)) * 0.5
 
-    def load_image(self, image_path):
-        return torch.ones((1, 3, 224, 224))  # dummy tensor
+class DummyImageModel(torch.nn.Module):
+    def forward(self, pixel_values):
+        batch_size = pixel_values.size(0)
+        return type(
+            "Output", (), {"last_hidden_state": torch.ones((batch_size, 197, 6))}
+        )
+
+
+def test_combined_encoding(tmp_path):
+    encoder = ContextEncoder(
+        text_model=DummyTextModel(),
+        image_model=DummyImageModel(),
+        tokenizer=DummyTokenizer(),
+        device="cpu",
+    )
+
+    from PIL import Image
+
+    def dummy_open(path):
+        return Image.new("RGB", (224, 224))
+
+    Image.open = dummy_open
+
+    output = encoder.encode("some text", "fake.jpg")
+    assert isinstance(output, torch.Tensor)
+    assert output.shape == (10,)
+
+
+def test_missing_required_args_raises():
+    with pytest.raises(TypeError, match="missing .* arguments"):
+        ContextEncoder()
 
 
 def test_text_only_encoding():
-    encoder = ContextEncoder(text_encoder=DummyTextEncoder(), image_encoder=None)
-    result = encoder.encode([101, 102, 103], "")
-    assert result.shape == (4,)
-    assert torch.all(result == 3.0)
+    encoder = ContextEncoder(
+        text_model=DummyTextModel(),
+        image_model=None,
+        tokenizer=DummyTokenizer(),
+        device="cpu",
+    )
+    with pytest.raises(ValueError, match="image_model must be set"):
+        encoder.encode("text only", "fake.jpg")
 
 
 def test_image_only_encoding():
-    encoder = ContextEncoder(text_encoder=None, image_encoder=DummyImageEncoder())
-    with patch("os.path.exists", return_value=True):
-        result = encoder.encode([], "image.jpg")
-    assert result.shape == (6,)
-    assert torch.allclose(result, torch.tensor([0.5] * 6))
-
-
-def test_combined_encoding():
     encoder = ContextEncoder(
-        text_encoder=DummyTextEncoder(embedding_dim=4),
-        image_encoder=DummyImageEncoder(embedding_dim=6),
+        text_model=None, image_model=DummyImageModel(), tokenizer=None, device="cpu"
     )
-    with patch("os.path.exists", return_value=True):
-        result = encoder.encode([123, 456], "dummy.png")
-
-    assert result.shape == (10,)
-    assert torch.allclose(result[:4], torch.tensor([2.0] * 4))
-    assert torch.allclose(result[4:], torch.tensor([0.5] * 6))
-
-
-def test_missing_both_raises():
-    encoder = ContextEncoder()
-    with pytest.raises(ValueError, match="Both text and image encoders are missing"):
-        encoder.encode([], "")
-
-
-def test_text_cache_behavior():
-    encoder = ContextEncoder(text_encoder=DummyTextEncoder(), image_encoder=None)
-
-    result1 = encoder.encode([1, 2, 3], "")
-    result2 = encoder.encode([1, 2, 3], "")
-    assert torch.all(result1 == result2)
-
-    result3 = encoder.encode([1, 2, 3, 4], "")
-    assert not torch.all(result1 == result3)
+    with pytest.raises(ValueError, match="text_model and tokenizer must be set"):
+        encoder.encode("text goes here", "fake.jpg")

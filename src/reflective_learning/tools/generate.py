@@ -1,8 +1,10 @@
 import argparse
 import json
+
 import torch
-from src.reflective_learning.model import ReflectiveCore
+
 from src.reflective_learning.inference import sample_multiple_sequences
+from src.reflective_learning.model import ReflectiveCore
 
 
 def main():

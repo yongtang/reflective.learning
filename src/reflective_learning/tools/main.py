@@ -1,5 +1,6 @@
 import argparse
-from src.reflective_learning.tools import train, preprocess, generate, postprocess
+
+from src.reflective_learning.tools import generate, postprocess, preprocess, train
 
 
 def main():

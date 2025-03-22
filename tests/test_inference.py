@@ -1,8 +1,10 @@
-import torch
 import json
 from pathlib import Path
-from src.reflective_learning.model import ReflectiveCore
+
+import torch
+
 from src.reflective_learning.inference import sample_multiple_sequences
+from src.reflective_learning.model import ReflectiveCore
 
 
 def test_sample_multiple_sequences(tmp_path):
