@@ -35,13 +35,13 @@ class ReflectiveCore(nn.Module):
 
         self.output_proj = nn.Linear(d_model, vocab_size * state_size)
 
-    def forward(self, token_ids, state_ids, mask=None, prefix=None):
+    def forward(self, token_ids, state_ids, mask=None, prefix_embed=None):
         """
         Args:
             token_ids: Tensor of shape (B, T) – token IDs for the input sequence.
             state_ids: Tensor of shape (B, T) – state IDs corresponding to each token.
+            prefix_embed: Optional tensor of shape (B, C, d_model), prepended to token embeddings before transformer input.
             mask: Optional tensor of shape (B, T), where 1 indicates valid tokens and 0 indicates padding.
-            prefix: Optional tensor of shape (B, C, d_model), prepended to token embeddings before transformer input.
 
         Returns:
             logits: Tensor of shape (B, T, vocab_size, state_size)
@@ -49,14 +49,14 @@ class ReflectiveCore(nn.Module):
 
         B, T = token_ids.shape
 
-        if prefix is not None:
-            C = prefix.shape[1]
+        if prefix_embed is not None:
+            C = prefix_embed.shape[1]
             pos = torch.arange(C + T, device=token_ids.device).expand(B, -1)
             pos_embed = self.pos_embedding(pos)
 
             token_embed = self.token_embedding(token_ids)
             state_embed = self.state_embedding(state_ids)
-            x = torch.cat([prefix, token_embed + state_embed], dim=1)
+            x = torch.cat([prefix_embed, token_embed + state_embed], dim=1)
         else:
             C = 0
             pos = torch.arange(T, device=token_ids.device).expand(B, -1)

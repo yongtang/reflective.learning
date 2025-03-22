@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import os
 
@@ -61,10 +62,26 @@ def preprocess_textual_json(
                         raise ValueError(
                             f"Line {line_num}: Missing 'text' or 'image' field for context encoding"
                         )
-                    prefix = context_encoder.encode(
-                        text=example["text"], image_path=example["image"]
+
+                    text_input = example["text"]
+                    image_input = example["image"]
+
+                    if not isinstance(text_input, list):
+                        raise ValueError(
+                            f"Line {line_num}: 'text' must be a list of strings."
+                        )
+                    if not isinstance(image_input, list):
+                        raise ValueError(
+                            f"Line {line_num}: 'image' must be a list of strings."
+                        )
+
+                    prefix = context_encoder.encode(text=text_input, image=image_input)
+                    prefix_bytes = (
+                        prefix.to(dtype=torch.float32).contiguous().numpy().tobytes()
                     )
-                    output["prefix"] = prefix.tolist()
+                    output["prefix"] = "b64://" + base64.b64encode(prefix_bytes).decode(
+                        "utf-8"
+                    )
 
                 json.dump(output, fout)
                 fout.write("\n")

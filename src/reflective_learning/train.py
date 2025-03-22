@@ -26,21 +26,6 @@ def train(
 ):
     """
     Trains a ReflectiveCore model on the provided dataset.
-
-    Args:
-        json_paths (str or list): One or more paths to JSONL dataset files.
-        vocab_size (int): Total number of token types.
-        state_size (int): Total number of states.
-        max_seq_len (int): Maximum sequence length.
-        epochs (int): Number of training epochs.
-        batch_size (int): Batch size.
-        lr (float): Learning rate.
-        save_path (str, optional): If given, saves final model weights here.
-        device (str, optional): 'cuda', 'cpu', or None (auto-detect).
-        d_model (int): Transformer hidden dimension size.
-        n_layers (int): Number of transformer decoder layers.
-        n_heads (int): Number of attention heads.
-        dim_ff (int): Feedforward network size.
     """
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -63,11 +48,19 @@ def train(
     for epoch in range(epochs):
         total_loss = 0.0
 
-        for token_ids, state_ids in dataloader:
-            token_ids = token_ids.to(device)
-            state_ids = state_ids.to(device)
+        for batch in dataloader:
+            token_ids = batch["token_ids"].to(device)
+            state_ids = batch["state_ids"].to(device)
+            prefix_embed = batch.get("prefix_embed", None)
+            prefix_embed = batch.get("prefix_embed", None)
+            if prefix_embed is not None and prefix_embed.numel() > 0:
+                prefix_embed = prefix_embed.to(device)
+            else:
+                prefix_embed = torch.zeros(
+                    (token_ids.size(0), 0, model.d_model), device=device
+                )
 
-            logits = model(token_ids, state_ids)
+            logits = model(token_ids, state_ids, prefix_embed=prefix_embed)
 
             # Predict next token/state → shift target
             token_target = token_ids[:, 1:]

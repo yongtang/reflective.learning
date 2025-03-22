@@ -10,6 +10,10 @@ class DummyTokenizer:
 
 
 class DummyTextModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.config = type("Config", (), {"hidden_size": 4})()
+
     def forward(self, input_ids):
         batch_size = input_ids.size(0)
         seq_len = input_ids.size(1)
@@ -19,11 +23,20 @@ class DummyTextModel(torch.nn.Module):
 
 
 class DummyImageModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.config = type("Config", (), {"hidden_size": 4})()
+
     def forward(self, pixel_values):
         batch_size = pixel_values.size(0)
         return type(
-            "Output", (), {"last_hidden_state": torch.ones((batch_size, 197, 6))}
+            "Output", (), {"last_hidden_state": torch.ones((batch_size, 197, 4))}
         )
+
+
+class DummyImageProcessor:
+    def __call__(self, images, return_tensors):
+        return type("Output", (), {"pixel_values": torch.randn(1, 3, 224, 224)})()
 
 
 def test_combined_encoding(tmp_path):
@@ -31,6 +44,7 @@ def test_combined_encoding(tmp_path):
         text_model=DummyTextModel(),
         image_model=DummyImageModel(),
         tokenizer=DummyTokenizer(),
+        image_processor=DummyImageProcessor(),
         device="cpu",
     )
 
@@ -41,9 +55,10 @@ def test_combined_encoding(tmp_path):
 
     Image.open = dummy_open
 
-    output = encoder.encode("some text", "fake.jpg")
+    output = encoder.encode(["some text"], ["fake.jpg"])
     assert isinstance(output, torch.Tensor)
-    assert output.shape == (10,)
+    assert output.ndim == 2  # [seq_len, dim]
+    assert output.shape[1] == 4  # hidden dim
 
 
 def test_missing_required_args_raises():
@@ -51,20 +66,12 @@ def test_missing_required_args_raises():
         ContextEncoder()
 
 
-def test_text_only_encoding():
-    encoder = ContextEncoder(
-        text_model=DummyTextModel(),
-        image_model=None,
-        tokenizer=DummyTokenizer(),
-        device="cpu",
-    )
-    with pytest.raises(ValueError, match="image_model must be set"):
-        encoder.encode("text only", "fake.jpg")
-
-
-def test_image_only_encoding():
-    encoder = ContextEncoder(
-        text_model=None, image_model=DummyImageModel(), tokenizer=None, device="cpu"
-    )
-    with pytest.raises(ValueError, match="text_model and tokenizer must be set"):
-        encoder.encode("text goes here", "fake.jpg")
+def test_assert_missing_text_model():
+    with pytest.raises(AssertionError, match="text_model is required"):
+        ContextEncoder(
+            text_model=None,
+            image_model=DummyImageModel(),
+            tokenizer=DummyTokenizer(),
+            image_processor=DummyImageProcessor(),
+            device="cpu",
+        )

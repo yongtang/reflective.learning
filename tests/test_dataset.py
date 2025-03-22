@@ -13,7 +13,6 @@ def create_test_file(path, data):
 
 
 def test_fixed_length_batching(tmp_path):
-    # Create one test file
     dataset_path = tmp_path / "fixed.json"
     data = [{"token": [1, 2, 0], "state": 0}, {"token": [3, 4, 5, 0], "state": 1}]
     create_test_file(dataset_path, data)
@@ -22,7 +21,9 @@ def test_fixed_length_batching(tmp_path):
     dataset = ReflectiveDataset(str(dataset_path), max_seq_len=max_seq_len)
     dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
 
-    tokens, states = next(iter(dataloader))
+    batch = next(iter(dataloader))
+    tokens = batch["token_ids"]
+    states = batch["state_ids"]
 
     assert tokens.shape == (2, max_seq_len)
     assert states.shape == (2, max_seq_len)
@@ -31,12 +32,11 @@ def test_fixed_length_batching(tmp_path):
 
 
 def test_variable_length_mode(tmp_path):
-    # Create a dataset file
     dataset_path = tmp_path / "variable.json"
     data = [{"token": [1, 2, 0], "state": 0}, {"token": [3, 4, 5, 0], "state": 1}]
     create_test_file(dataset_path, data)
 
-    dataset = ReflectiveDataset(str(dataset_path))  # No max_seq_len
+    dataset = ReflectiveDataset(str(dataset_path))  # no max_seq_len
     dataloader = DataLoader(
         dataset, batch_size=2, collate_fn=lambda x: x, shuffle=False
     )
@@ -44,9 +44,11 @@ def test_variable_length_mode(tmp_path):
     batch = next(iter(dataloader))
     assert len(batch) == 2
 
-    for tokens, states in batch:
+    for item in batch:
+        tokens = item["token_ids"]
+        states = item["state_ids"]
         assert tokens.shape == states.shape
-        assert (states == states[0]).all()  # uniform state per row
+        assert (states == states[0]).all()
 
 
 def test_multiple_files_combined(tmp_path):
@@ -60,5 +62,7 @@ def test_multiple_files_combined(tmp_path):
     dataset = ReflectiveDataset([str(file1), str(file2)], max_seq_len=4)
     assert len(dataset) == 2
 
-    tokens, states = dataset[0]
+    item = dataset[0]
+    tokens = item["token_ids"]
+    states = item["state_ids"]
     assert tokens.shape == states.shape == torch.Size([4])

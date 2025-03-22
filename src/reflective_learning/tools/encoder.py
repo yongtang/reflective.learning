@@ -4,24 +4,28 @@ from functools import lru_cache
 
 import torch
 from PIL import Image
-from torchvision import transforms
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
 
 class ContextEncoder:
-    def __init__(self, text_model, image_model, tokenizer, device="cpu"):
-        self.text_model = text_model.to(device) if text_model else None
-        self.image_model = image_model.to(device) if image_model else None
-        self.tokenizer = tokenizer
-        self.device = device
+    def __init__(
+        self, text_model, image_model, tokenizer, image_processor, device="cpu"
+    ):
+        assert text_model is not None, "text_model is required"
+        assert image_model is not None, "image_model is required"
+        assert tokenizer is not None, "tokenizer is required"
+        assert image_processor is not None, "image_processor is required"
 
-        self.image_transform = transforms.Compose(
-            [
-                transforms.Resize((224, 224)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=0.5, std=0.5),
-            ]
+        assert text_model.config.hidden_size == image_model.config.hidden_size, (
+            f"Text model (hidden={text_model.config.hidden_size}) and image model "
+            f"(hidden={image_model.config.hidden_size}) must match."
         )
+
+        self.text_model = text_model.to(device)
+        self.image_model = image_model.to(device)
+        self.tokenizer = tokenizer
+        self.image_processor = image_processor
+        self.device = device
 
     @classmethod
     def from_pretrained(cls, context_dir, device="cpu"):
@@ -40,34 +44,47 @@ class ContextEncoder:
         image_model = AutoModel.from_pretrained(
             image_cfg["model"], revision=image_cfg["revision"]
         )
+        image_processor = AutoImageProcessor.from_pretrained(
+            image_cfg["model"], revision=image_cfg["revision"], use_fast=True
+        )
 
-        return cls(text_model, image_model, tokenizer, device=device)
+        return cls(text_model, image_model, tokenizer, image_processor, device=device)
 
     @lru_cache(maxsize=1024)
-    def encode_text(self, text):
-        if self.text_model is None or self.tokenizer is None:
-            raise ValueError("text_model and tokenizer must be set for text encoding.")
-
+    def encode_text_embed(self, text: str) -> torch.Tensor:
         inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
         input_ids = inputs["input_ids"].to(self.device)
 
         with torch.no_grad():
             output = self.text_model(input_ids=input_ids)
-            return output.last_hidden_state.mean(dim=1).squeeze(0).detach().cpu()
+            return output.last_hidden_state.squeeze(0).detach().cpu()  # shape [T, D]
 
     @lru_cache(maxsize=1024)
-    def encode_image(self, image_path):
-        if self.image_model is None:
-            raise ValueError("image_model must be set for image encoding.")
-
+    def encode_image_embed(self, image_path: str) -> torch.Tensor:
         image = Image.open(image_path).convert("RGB")
-        image_tensor = self.image_transform(image).unsqueeze(0).to(self.device)
+        pixel_values = self.image_processor(
+            images=image, return_tensors="pt"
+        ).pixel_values.to(self.device)
 
         with torch.no_grad():
-            output = self.image_model(pixel_values=image_tensor)
-            return output.last_hidden_state.mean(dim=1).squeeze(0).detach().cpu()
+            output = self.image_model(pixel_values=pixel_values)
+            return output.last_hidden_state.squeeze(0).detach().cpu()  # shape [I, D]
 
-    def encode(self, text, image_path):
-        text_embed = self.encode_text(text)
-        image_embed = self.encode_image(image_path)
-        return torch.cat([text_embed, image_embed], dim=0)
+    def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
+        segments = []
+
+        # Always create break embedding
+        break_dim = self.text_model.config.hidden_size
+        break_embed = torch.zeros((1, break_dim), dtype=torch.float32)
+
+        # Add text embeddings
+        for t in text:
+            segments.append(self.encode_text_embed(t))
+        segments.append(break_embed.clone())  # break between text and image
+
+        # Add image embeddings
+        for path in image:
+            segments.append(self.encode_image_embed(path))
+        segments.append(break_embed.clone())  # break between context and tokens
+
+        return torch.cat(segments, dim=0)

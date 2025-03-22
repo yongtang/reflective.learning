@@ -1,5 +1,5 @@
+import base64
 import json
-from pathlib import Path
 
 import pytest
 import torch
@@ -8,8 +8,8 @@ from src.reflective_learning.tools.preprocess import preprocess_textual_json
 
 
 class DummyContextEncoder:
-    def encode(self, text, image_path):
-        return torch.tensor([0.1, 0.2, 0.3])
+    def encode(self, text, image):
+        return torch.tensor([[1.0, 2.0, 3.0, 4.0]], dtype=torch.float32)
 
 
 def test_preprocess_with_context(tmp_path):
@@ -20,8 +20,8 @@ def test_preprocess_with_context(tmp_path):
         {
             "token": ["X1"],
             "state": "S1",
-            "text": "Start location is A and goal is B.",
-            "image": "some_image.jpg",
+            "text": ["Start location is A and goal is B."],
+            "image": ["some_image.jpg"],
         },
     ]
 
@@ -36,13 +36,18 @@ def test_preprocess_with_context(tmp_path):
     preprocess_textual_json(input_path, output_path, vocab_map, state_map, encoder)
 
     with output_path.open() as f:
-        lines = list(f)
-        assert len(lines) == 1
-        example = json.loads(lines[0])
-        assert example["token"] == [0]
-        assert example["state"] == 0
-        assert "prefix" in example
-        assert example["prefix"] == pytest.approx([0.1, 0.2, 0.3], rel=1e-5)
+        example = json.loads(f.readline())
+
+    assert example["token"] == [0]
+    assert example["state"] == 0
+    assert example["prefix"].startswith("b64://")
+
+    tensor = torch.frombuffer(
+        base64.b64decode(example["prefix"][6:]), dtype=torch.float32
+    )
+
+    assert tensor.shape == (4,)
+    assert torch.allclose(tensor, torch.tensor([1.0, 2.0, 3.0, 4.0]), rtol=1e-5)
 
 
 def test_preprocess_context_missing_fields(tmp_path):
@@ -50,8 +55,8 @@ def test_preprocess_context_missing_fields(tmp_path):
     output_path = tmp_path / "output.json"
 
     input_data = [
-        {"token": ["X1"], "state": "S1", "image": "some_image.jpg"},
-        {"token": ["X2"], "state": "S2", "text": "no image provided"},
+        {"token": ["X1"], "state": "S1", "image": ["some_image.jpg"]},
+        {"token": ["X2"], "state": "S2", "text": ["no image provided"]},
     ]
 
     with input_path.open("w") as f:
