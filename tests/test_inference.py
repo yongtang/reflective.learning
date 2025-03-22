@@ -16,11 +16,11 @@ def test_sample_multiple_sequences(tmp_path):
     model = ReflectiveCore(
         vocab_size=vocab_size,
         state_size=state_size,
-        max_seq_len=max_seq_len,
         d_model=16,
-        n_layers=1,
-        n_heads=2,
-        dim_ff=32,
+        nhead=2,
+        dim_feedforward=32,
+        num_layers=1,
+        max_seq_len=max_seq_len,
     )
 
     # Initialize randomly and save checkpoint

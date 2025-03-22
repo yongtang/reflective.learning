@@ -14,9 +14,9 @@ def test_reflective_transformer_forward_and_loss():
         vocab_size=vocab_size,
         state_size=state_size,
         d_model=64,
-        n_layers=2,
-        n_heads=4,
-        dim_ff=256,
+        nhead=4,
+        dim_feedforward=256,
+        num_layers=2,
         max_seq_len=seq_len,
     )
 
@@ -26,5 +26,5 @@ def test_reflective_transformer_forward_and_loss():
     logits = model(token_ids, state_ids)
     assert logits.shape == (batch_size, seq_len, vocab_size, state_size)
 
-    loss = model.compute_loss(logits, token_ids, state_ids)
+    loss = model.loss(logits, token_ids, state_ids)
     assert loss.item() > 0

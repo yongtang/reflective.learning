@@ -18,7 +18,7 @@ def test_fixed_length_batching(tmp_path):
     create_test_file(dataset_path, data)
 
     max_seq_len = 6
-    dataset = ReflectiveDataset(str(dataset_path), max_seq_len=max_seq_len)
+    dataset = ReflectiveDataset(str(dataset_path), max_seq_len=max_seq_len, d_model=32)
     dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
 
     batch = next(iter(dataloader))
@@ -36,7 +36,7 @@ def test_variable_length_mode(tmp_path):
     data = [{"token": [1, 2, 0], "state": 0}, {"token": [3, 4, 5, 0], "state": 1}]
     create_test_file(dataset_path, data)
 
-    dataset = ReflectiveDataset(str(dataset_path))  # no max_seq_len
+    dataset = ReflectiveDataset(str(dataset_path), max_seq_len=None, d_model=32)
     dataloader = DataLoader(
         dataset, batch_size=2, collate_fn=lambda x: x, shuffle=False
     )
@@ -59,7 +59,7 @@ def test_multiple_files_combined(tmp_path):
     create_test_file(file1, data1)
     create_test_file(file2, data2)
 
-    dataset = ReflectiveDataset([str(file1), str(file2)], max_seq_len=4)
+    dataset = ReflectiveDataset([str(file1), str(file2)], max_seq_len=4, d_model=32)
     assert len(dataset) == 2
 
     item = dataset[0]

@@ -20,16 +20,33 @@ def train(
     save_path=None,
     device=None,
     d_model=768,
-    n_layers=12,
-    n_heads=12,
-    dim_ff=3072,
+    nhead=12,
+    dim_feedforward=3072,
+    dropout=0.1,
+    num_layers=12,
 ):
     """
     Trains a ReflectiveCore model on the provided dataset.
+
+    Args:
+        json_paths: str or list of paths to JSON dataset files
+        vocab_size: vocabulary size (V)
+        state_size: number of possible states (S)
+        max_seq_len: input sequence length
+        epochs: number of training epochs
+        batch_size: training batch size
+        lr: learning rate
+        save_path: optional path to save trained model
+        device: torch device string (e.g., 'cuda', 'cpu')
+        d_model: transformer embedding dimension
+        nhead: number of attention heads
+        dim_feedforward: dimension of FFN layers
+        dropout: dropout rate
+        num_layers: number of transformer decoder layers
     """
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    dataset = ReflectiveDataset(json_paths, max_seq_len=max_seq_len)
+    dataset = ReflectiveDataset(json_paths, max_seq_len=max_seq_len, d_model=d_model)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     model = ReflectiveCore(
@@ -37,9 +54,10 @@ def train(
         state_size=state_size,
         max_seq_len=max_seq_len,
         d_model=d_model,
-        n_layers=n_layers,
-        n_heads=n_heads,
-        dim_ff=dim_ff,
+        nhead=nhead,
+        dim_feedforward=dim_feedforward,
+        dropout=dropout,
+        num_layers=num_layers,
     ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -51,23 +69,19 @@ def train(
         for batch in dataloader:
             token_ids = batch["token_ids"].to(device)
             state_ids = batch["state_ids"].to(device)
-            prefix_embed = batch.get("prefix_embed", None)
-            prefix_embed = batch.get("prefix_embed", None)
-            if prefix_embed is not None and prefix_embed.numel() > 0:
-                prefix_embed = prefix_embed.to(device)
-            else:
-                prefix_embed = torch.zeros(
-                    (token_ids.size(0), 0, model.d_model), device=device
-                )
+            prefix = batch["prefix"].to(device)
 
-            logits = model(token_ids, state_ids, prefix_embed=prefix_embed)
+            if prefix.ndim == 2:
+                prefix = prefix.unsqueeze(0).expand(token_ids.size(0), -1, -1)
 
-            # Predict next token/state → shift target
+            logits = model(token_ids, state_ids, prefix=prefix)
+
+            # Shift for autoregressive prediction
             token_target = token_ids[:, 1:]
             state_target = state_ids[:, 1:]
-            logits = logits[:, :-1, :, :]  # align prediction
+            logits = logits[:, :-1, :, :]
 
-            loss = model.compute_loss(logits, token_target, state_target)
+            loss = model.loss(logits, token_target, state_target)
 
             optimizer.zero_grad()
             loss.backward()

@@ -1,6 +1,8 @@
+import base64
 import json
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -8,9 +10,17 @@ from src.reflective_learning.train import train
 
 
 def test_train_runs_end_to_end(tmp_path):
+
+    def dummy_prefix(context_len=2, d_model=32):
+        array = np.zeros((context_len, d_model), dtype=np.float32)
+        return base64.b64encode(array.tobytes()).decode("utf-8")
+
     # Prepare a small dummy dataset
     train_file = tmp_path / "train.json"
-    data = [{"token": [1, 2, 0], "state": 0}, {"token": [2, 3, 0], "state": 1}]
+    data = [
+        {"token": [1, 2, 0], "state": 0, "prefix": dummy_prefix()},
+        {"token": [2, 3, 0], "state": 1, "prefix": dummy_prefix()},
+    ]
     with train_file.open("w") as f:
         for row in data:
             f.write(json.dumps(row) + "\n")
@@ -33,9 +43,9 @@ def test_train_runs_end_to_end(tmp_path):
         save_path=str(save_path),
         device="cpu",  # Force CPU for test environment
         d_model=32,  # Smaller model to avoid memory issues
-        n_layers=1,
-        n_heads=2,
-        dim_ff=64,
+        nhead=2,
+        dim_feedforward=64,
+        num_layers=1,
     )
 
     # Checkpoint file should exist and be loadable
