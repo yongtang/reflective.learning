@@ -87,17 +87,24 @@ class ReflectiveCore(nn.Module):
 
         Args:
             embed (Tensor): [B, L, d_model] input embeddings (prefix + token sequence).
-            mask (Tensor, optional): [L, L] or [B, L, L] attention mask. Defaults to None.
+            mask (Tensor, optional): [B, L, L] or [L, L] attention mask. Defaults to None.
 
         Returns:
             Tensor: [B, L, vocab_size, state_size] output logits.
         """
         B, L, _ = embed.shape
-        pos_ids = torch.arange(L, device=embed.device).unsqueeze(0).expand(B, -1)
-        x = embed + self.pos_embedding(pos_ids)
+        pos_ids = (
+            torch.arange(L, device=embed.device).unsqueeze(0).expand(B, -1)
+        )  # [B, L]
+        x = embed + self.pos_embedding(pos_ids)  # [B, L, d_model]
+
+        if mask is not None and mask.ndim == 3:  # [B, L, L] -> [B * nhead, L, L]
+            mask = mask.repeat_interleave(
+                self.decoder.layers[0].self_attn.num_heads, dim=0
+            )
 
         x = self.decoder(x, x, tgt_mask=mask)  # [B, L, d_model]
-        logits = self.output_linear(x)
+        logits = self.output_linear(x)  # [B, L, V * S]
         return logits.view(B, L, self.vocab_size, self.state_size)
 
     def loss(
