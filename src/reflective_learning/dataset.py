@@ -2,6 +2,7 @@ import base64
 import json
 from typing import List, Union
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 
@@ -46,17 +47,14 @@ class ReflectiveDataset(Dataset):
         # Decode prefix if present (variable length)
         prefix = torch.zeros((0, self.d_model), dtype=torch.float32)
         if "prefix" in entry:
-            try:
-                raw = base64.b64decode(entry["prefix"])
-                flat = torch.frombuffer(raw, dtype=torch.float32)
-                if flat.numel() % self.d_model != 0:
-                    raise ValueError(
-                        f"Prefix tensor size {flat.numel()} is not divisible by d_model={self.d_model}"
-                    )
-                context_len = flat.numel() // self.d_model
-                prefix = flat.reshape(context_len, self.d_model)
-            except Exception as e:
-                raise ValueError(f"Failed to decode prefix: {e}")
+            assert entry["prefix"].startswith("b64://")
+            chunk = np.frombuffer(
+                base64.b64decode(entry["prefix"].removeprefix("b64://")),
+                dtype=np.float32,
+            )
+            assert chunk.size % self.d_model == 0
+            context_len = chunk.size // self.d_model
+            prefix = torch.from_numpy(chunk.copy()).reshape(context_len, self.d_model)
 
         return {
             "token_ids": token_ids,

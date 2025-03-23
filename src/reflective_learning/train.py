@@ -3,6 +3,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import tqdm
 from torch.utils.data import DataLoader
 
 from src.reflective_learning.dataset import ReflectiveDataset
@@ -155,27 +156,35 @@ def train(
     model.train()
     for epoch in range(epochs):
         total_loss = 0.0
+        num_batches = len(dataloader)
 
-        print(f"🌀 Epoch {epoch + 1}/{epochs}")
-        for batch in tqdm(dataloader, desc=f"Training Epoch {epoch+1}"):
-            embed = batch["embed"].to(device)  # [B, L, d_model]
-            mask = batch["mask"].to(device)  # [B, L, L]
-            token_target = batch["token_target"].to(device)  # [B, T-1]
-            state_target = batch["state_target"].to(device)  # [B, T-1]
+        print(f"\n🌀 Epoch {epoch + 1}/{epochs}")
 
-            logits = model.call(embed, mask=mask)  # [B, L, V, S]
-            logits = logits[:, -token_target.size(1) - 1 : -1]  # [B, T-1, V, S]
+        # tqdm progress bar
+        with tqdm(dataloader, desc=f"Training", leave=True, ncols=100) as pbar:
+            for step, batch in enumerate(pbar):
+                embed = batch["embed"].to(device)
+                mask = batch["mask"].to(device)
+                token_target = batch["token_target"].to(device)
+                state_target = batch["state_target"].to(device)
 
-            loss = model.loss(logits, token_target, state_target)
+                logits = model.call(embed, mask=mask)
+                logits = logits[:, -token_target.size(1) - 1 : -1]
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                loss = model.loss(logits, token_target, state_target)
 
-            total_loss += loss.item()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-        avg_loss = total_loss / len(dataloader)
-        print(f"📉 Epoch {epoch + 1} complete. Avg loss: {avg_loss:.4f}")
+                total_loss += loss.item()
+
+                avg_loss_so_far = total_loss / (step + 1)
+                pbar.set_postfix(loss=f"{avg_loss_so_far:.4f}")
+
+        print(
+            f"📉 Epoch {epoch + 1} complete. Avg loss: {total_loss / num_batches:.4f}"
+        )
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)

@@ -1,6 +1,7 @@
 import base64
 import json
 
+import numpy as np
 import pytest
 import torch
 
@@ -42,8 +43,10 @@ def test_preprocess_with_context(tmp_path):
     assert example["state"] == 0
     assert example["prefix"].startswith("b64://")
 
-    tensor = torch.frombuffer(
-        base64.b64decode(example["prefix"][6:]), dtype=torch.float32
+    tensor = torch.from_numpy(
+        np.frombuffer(
+            base64.b64decode(example["prefix"].removeprefix("b64://")), dtype=np.float32
+        ).copy()
     )
 
     assert tensor.shape == (4,)

@@ -72,7 +72,9 @@ def test_multiple_files_combined(tmp_path):
 
 def test_variable_length_prefix_decoding(tmp_path):
     def encode_prefix(array: np.ndarray) -> str:
-        return base64.b64encode(array.astype(np.float32).tobytes()).decode("utf-8")
+        return "b64://" + base64.b64encode(array.astype(np.float32).tobytes()).decode(
+            "utf-8"
+        )
 
     d_model = 32
     context_len = 3  # variable length

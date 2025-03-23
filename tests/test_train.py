@@ -13,7 +13,7 @@ def test_train_runs_end_to_end(tmp_path):
 
     def dummy_prefix(context_len=2, d_model=32):
         array = np.zeros((context_len, d_model), dtype=np.float32)
-        return base64.b64encode(array.tobytes()).decode("utf-8")
+        return "b64://" + base64.b64encode(array.tobytes()).decode("utf-8")
 
     # Prepare a small dummy dataset
     train_file = tmp_path / "train.json"
@@ -67,7 +67,7 @@ def test_train_with_variable_length_prefix(tmp_path):
     def encode_prefix(length, d_model):
         """Returns base64-encoded zero tensor of shape [length, d_model]"""
         array = np.zeros((length, d_model), dtype=np.float32)
-        return base64.b64encode(array.tobytes()).decode("utf-8")
+        return "b64://" + base64.b64encode(array.tobytes()).decode("utf-8")
 
     train_file = tmp_path / "train_variable.json"
     d_model = 32
