@@ -92,6 +92,9 @@ def collate_with_prefix(batch, model):
     }
 
 
+from tqdm import tqdm
+
+
 def train(
     json_paths,
     vocab_size,
@@ -112,6 +115,20 @@ def train(
     Trains a ReflectiveCore model on the provided dataset.
     """
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    print("🚀 Starting training...")
+    print(f"📁 Input files: {json_paths}")
+    print(
+        f"📐 Vocab size: {vocab_size}, State size: {state_size}, Max seq len: {max_seq_len}"
+    )
+    print(
+        f"🧠 Model: d_model={d_model}, layers={num_layers}, heads={nhead}, ff={dim_feedforward}"
+    )
+    print(f"⚙️ Epochs: {epochs}, Batch size: {batch_size}, LR: {lr}")
+    print(f"💻 Device: {device}")
+    if save_path:
+        print(f"💾 Will save model to: {save_path}")
+    print()
 
     dataset = ReflectiveDataset(json_paths, max_seq_len=max_seq_len, d_model=d_model)
 
@@ -139,15 +156,14 @@ def train(
     for epoch in range(epochs):
         total_loss = 0.0
 
-        for batch in dataloader:
+        print(f"🌀 Epoch {epoch + 1}/{epochs}")
+        for batch in tqdm(dataloader, desc=f"Training Epoch {epoch+1}"):
             embed = batch["embed"].to(device)  # [B, L, d_model]
             mask = batch["mask"].to(device)  # [B, L, L]
             token_target = batch["token_target"].to(device)  # [B, T-1]
             state_target = batch["state_target"].to(device)  # [B, T-1]
 
             logits = model.call(embed, mask=mask)  # [B, L, V, S]
-
-            # Keep only the portion matching targets
             logits = logits[:, -token_target.size(1) - 1 : -1]  # [B, T-1, V, S]
 
             loss = model.loss(logits, token_target, state_target)
@@ -159,7 +175,7 @@ def train(
             total_loss += loss.item()
 
         avg_loss = total_loss / len(dataloader)
-        print(f"Epoch {epoch + 1}: Loss = {avg_loss:.4f}")
+        print(f"📉 Epoch {epoch + 1} complete. Avg loss: {avg_loss:.4f}")
 
     if save_path:
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
