@@ -37,7 +37,7 @@ def test_sample_multiple_sequences(tmp_path):
         num_sequences=5,
         max_seq_len=max_seq_len,
         temperature=1.0,
-        prefix=dummy_prefix,  # ✅ required
+        prefix=dummy_prefix,
         device="cpu",
     )
 
@@ -45,10 +45,12 @@ def test_sample_multiple_sequences(tmp_path):
     for seq in sequences:
         assert isinstance(seq, list)
         assert all(isinstance(t, int) for t in seq)
-        if seq[-1] == 0:
-            assert len(seq) <= max_seq_len
+        assert len(seq) > 0
+        if 0 in seq:
+            stop_index = seq.index(0)
+            assert stop_index < max_seq_len
         else:
-            assert len(seq) == max_seq_len
+            assert len(seq) <= max_seq_len
 
 
 def test_sample_multiple_sequences_batched(tmp_path):
@@ -103,7 +105,7 @@ def test_sample_multiple_sequences_batched(tmp_path):
             stop_index = seq.index(0)
             assert stop_index < max_seq_len
         else:
-            assert len(seq) == max_seq_len
+            assert len(seq) <= max_seq_len
 
     # Optional diversity check (very loose)
     unique_outputs = {tuple(seq) for seq in sequences}

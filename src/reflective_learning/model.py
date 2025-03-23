@@ -51,21 +51,22 @@ class ReflectiveCore(nn.Module):
         self,
         token_ids: torch.Tensor,
         state_ids: torch.Tensor,
-        prefix: torch.Tensor = None,
+        prefix: torch.Tensor,
         mask: torch.Tensor = None,
     ) -> torch.Tensor:
         """
-        Standard forward interface that takes token and state IDs and optional prefix embeddings.
+        Forward interface for token/state ID inputs.
 
         Args:
             token_ids (Tensor): [B, T] LongTensor of token indices.
             state_ids (Tensor): [B, T] LongTensor of state indices.
-            prefix (Tensor, optional): [B, C, d_model] context prefix embeddings.
+            prefix (Tensor): [B, C, d_model] context prefix embeddings.
             mask (Tensor, optional): [L, L] or [B, L, L] causal attention mask.
 
         Returns:
             Tensor: [B, T, vocab_size, state_size] output logits.
         """
+        assert prefix is not None, "prefix is required"
         B, T = token_ids.shape
         V, S = self.vocab_size, self.state_size
 
@@ -76,9 +77,7 @@ class ReflectiveCore(nn.Module):
         x = x.view(B, T, V * S)
         x = self.input_linear(x)  # [B, T, d_model]
 
-        if prefix is not None:
-            x = torch.cat([prefix, x], dim=1)  # [B, C+T, d_model]
-
+        x = torch.cat([prefix, x], dim=1)  # [B, C+T, d_model]
         return self.call(x, mask=mask)
 
     def call(self, embed: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
@@ -87,16 +86,18 @@ class ReflectiveCore(nn.Module):
 
         Args:
             embed (Tensor): [B, L, d_model] input embeddings (prefix + token sequence).
-            mask (Tensor, optional): [B, L, L] or [L, L] attention mask. Defaults to None.
+            mask (Tensor, optional): [B, L, L] or [L, L] attention mask.
 
         Returns:
             Tensor: [B, L, vocab_size, state_size] output logits.
         """
+        assert embed is not None, "prefix/embed is required"
+
         B, L, _ = embed.shape
         pos_ids = (
             torch.arange(L, device=embed.device).unsqueeze(0).expand(B, -1)
         )  # [B, L]
-        x = embed + self.pos_embedding(pos_ids)  # [B, L, d_model]
+        x = embed + self.pos_embedding(pos_ids)
 
         if mask is not None and mask.ndim == 3:  # [B, L, L] -> [B * nhead, L, L]
             mask = mask.repeat_interleave(
