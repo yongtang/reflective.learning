@@ -2,7 +2,7 @@
 Reflective Learning CLI Toolkit
 
 This script provides a command-line interface for working with ReflectiveCore models,
-including training, preprocessing context data, generating sequences, and postprocessing outputs.
+including training, preprocessing context data, and generating sequences.
 
 Run with:
     python -m src.reflective_learning.tools.main <command> [options]
@@ -11,7 +11,6 @@ Commands:
     train         Train a ReflectiveCore model from token/state sequences
     preprocess    Convert raw JSON with text/images into numerical embeddings
     generate      Sample sequences from a trained model
-    postprocess   Convert numeric model output back to readable format
 """
 
 import argparse
@@ -116,23 +115,30 @@ def run_preprocess(args):
 
 # === Generate ===
 def run_generate(args):
-    # Load state weights from JSON string or file
+    # Load state weights from file, JSON string, or CSV-style input
     if args.state_dist.endswith(".json"):
         with open(args.state_dist) as f:
             state_weights = json.load(f)
+    elif "=" in args.state_dist:
+        state_weights = {}
+        for pair in args.state_dist.split(","):
+            key, value = pair.split("=")
+            state_weights[key.strip()] = float(value.strip())
     else:
         state_weights = json.loads(args.state_dist)
-    state_weights = {int(k): float(v) for k, v in state_weights.items()}
 
-    # Load vocab for decoding token IDs
+    # Load vocab and state mappings
     with open(args.mapping) as f:
-        vocab_map = json.load(f)["vocab"]
+        mapping = json.load(f)
+    vocab_map = mapping["vocab"]
+    state_map = mapping["state"]
     id_to_token = {v: k for k, v in vocab_map.items()}
+    state_weights = {state_map[k]: v for k, v in state_weights.items()}
 
     # Load model
     model = ReflectiveCore(
         vocab_size=len(vocab_map),
-        state_size=len(state_weights),
+        state_size=len(state_map),
         max_seq_len=args.max_seq_len,
     )
     device = torch.device(
@@ -148,6 +154,11 @@ def run_generate(args):
         for line_num, line in enumerate(f, 1):
             try:
                 base = json.loads(line)
+
+                if "token" in base or "state" in base:
+                    raise ValueError(
+                        f"Line {line_num}: Input should not contain 'token' or 'state'"
+                    )
                 if "prefix" not in base:
                     raise ValueError("Missing 'prefix' field")
 
@@ -157,19 +168,6 @@ def run_generate(args):
                 ).to(device)
                 prefix_tensor = prefix_tensor.view(-1, model.d_model)
 
-                # Optional token/state prefix
-                token_ids = (
-                    torch.tensor(base["token"], dtype=torch.long)
-                    if "token" in base
-                    else None
-                )
-                state_ids = (
-                    torch.tensor(base["state"], dtype=torch.long)
-                    if "state" in base
-                    else None
-                )
-
-                # Repeat input if requested
                 for _ in range(args.repeat):
                     tokens = sample_multiple_sequences_batched(
                         model=model,
@@ -178,8 +176,6 @@ def run_generate(args):
                         max_seq_len=args.max_seq_len,
                         temperature=args.temperature,
                         prefix=prefix_tensor,
-                        token_ids=token_ids,
-                        state_ids=state_ids,
                         device=device,
                     )[0]
 
@@ -205,9 +201,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Reflective Learning CLI Toolkit",
         epilog="""Example:
-  python -m src.reflective_learning.tools.main train \\
-      --input data/train.json \\
-      --mapping checkpoints/context/mappings.json \\
+  python -m src.reflective_learning.tools.main train \
+      --input data/train.json \
+      --mapping checkpoints/context/mappings.json \
       --epochs 5 --batch-size 16 --lr 1e-4
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -252,7 +248,10 @@ def main():
         "--mapping", type=str, required=True, help="Path to mappings.json"
     )
     gen_parser.add_argument(
-        "--state-dist", type=str, required=True, help="JSON string or .json path"
+        "--state-dist",
+        type=str,
+        required=True,
+        help="State distribution (JSON string, path, or CSV: 'a=0.5,b=0.5')",
     )
     gen_parser.add_argument("--max-seq-len", type=int, default=128)
     gen_parser.add_argument("--temperature", type=float, default=1.0)
