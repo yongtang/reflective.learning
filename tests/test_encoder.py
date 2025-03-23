@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from src.reflective_learning.tools.encoder import ContextEncoder
+from src.reflective_learning.tools.main import ContextEncoder
 
 
 class DummyTokenizer:

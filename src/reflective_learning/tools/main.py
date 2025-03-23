@@ -16,14 +16,99 @@ Commands:
 import argparse
 import base64
 import json
+import os
+from functools import lru_cache
 
 import numpy as np
 import torch
+from PIL import Image
+from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
 from src.reflective_learning import train
 from src.reflective_learning.inference import sample_multiple_sequences_batched
 from src.reflective_learning.model import ReflectiveCore
-from src.reflective_learning.tools.encoder import ContextEncoder
+
+
+# === ContextEncoder (formerly encoder.py) ===
+class ContextEncoder:
+    def __init__(
+        self, text_model, image_model, tokenizer, image_processor, device="cpu"
+    ):
+        assert text_model is not None, "text_model is required"
+        assert image_model is not None, "image_model is required"
+        assert tokenizer is not None, "tokenizer is required"
+        assert image_processor is not None, "image_processor is required"
+
+        assert text_model.config.hidden_size == image_model.config.hidden_size, (
+            f"Text model (hidden={text_model.config.hidden_size}) and image model "
+            f"(hidden={image_model.config.hidden_size}) must match."
+        )
+
+        self.text_model = text_model.to(device)
+        self.image_model = image_model.to(device)
+        self.tokenizer = tokenizer
+        self.image_processor = image_processor
+        self.device = device
+
+    @classmethod
+    def from_pretrained(cls, context_dir, device="cpu"):
+        with open(os.path.join(context_dir, "context_versions.json")) as f:
+            versions = json.load(f)
+
+        text_cfg = versions["pretrained_models"]["gpt2"]
+        image_cfg = versions["pretrained_models"]["vit"]
+
+        text_model = AutoModel.from_pretrained(
+            text_cfg["model"], revision=text_cfg["revision"]
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            text_cfg["model"], revision=text_cfg["revision"]
+        )
+        image_model = AutoModel.from_pretrained(
+            image_cfg["model"], revision=image_cfg["revision"]
+        )
+        image_processor = AutoImageProcessor.from_pretrained(
+            image_cfg["model"], revision=image_cfg["revision"], use_fast=True
+        )
+
+        return cls(text_model, image_model, tokenizer, image_processor, device=device)
+
+    @lru_cache(maxsize=1024)
+    def encode_text_embed(self, text: str) -> torch.Tensor:
+        inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
+        input_ids = inputs["input_ids"].to(self.device)
+
+        with torch.no_grad():
+            output = self.text_model(input_ids=input_ids)
+            return output.last_hidden_state.squeeze(0).detach().cpu()  # shape [T, D]
+
+    @lru_cache(maxsize=1024)
+    def encode_image_embed(self, image_path: str) -> torch.Tensor:
+        image = Image.open(image_path).convert("RGB")
+        pixel_values = self.image_processor(
+            images=image, return_tensors="pt"
+        ).pixel_values.to(self.device)
+
+        with torch.no_grad():
+            output = self.image_model(pixel_values=pixel_values)
+            return output.last_hidden_state.squeeze(0).detach().cpu()  # shape [I, D]
+
+    def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
+        segments = []
+
+        # Always create break embedding
+        break_dim = self.text_model.config.hidden_size
+        break_embed = torch.zeros((1, break_dim), dtype=torch.float32)
+
+        for t in text:
+            segments.append(self.encode_text_embed(t))
+        segments.append(break_embed.clone())  # between text and image
+
+        for path in image:
+            segments.append(self.encode_image_embed(path))
+        segments.append(break_embed.clone())  # end of prefix
+
+        return torch.cat(segments, dim=0)
 
 
 # === Train ===
@@ -84,18 +169,13 @@ def run_preprocess(args):
                     output["token"] = token_ids
                     output["state"] = state_id
 
-                # Add prefix
                 if context_encoder:
                     if "text" not in example or "image" not in example:
                         raise ValueError(f"Line {line_num}: Missing 'text' or 'image'")
                     if not isinstance(example["text"], list):
-                        raise ValueError(
-                            f"Line {line_num}: 'text' must be list of strings."
-                        )
+                        raise ValueError(f"Line {line_num}: 'text' must be a list.")
                     if not isinstance(example["image"], list):
-                        raise ValueError(
-                            f"Line {line_num}: 'image' must be list of strings."
-                        )
+                        raise ValueError(f"Line {line_num}: 'image' must be a list.")
 
                     prefix = context_encoder.encode(example["text"], example["image"])
                     prefix_bytes = (
@@ -116,16 +196,16 @@ def run_preprocess(args):
 # === Generate ===
 def run_generate(args):
     # Load state weights from file, JSON string, or CSV-style input
-    if args.state_dist.endswith(".json"):
-        with open(args.state_dist) as f:
+    if args.state_weights.endswith(".json"):
+        with open(args.state_weights) as f:
             state_weights = json.load(f)
-    elif "=" in args.state_dist:
+    elif "=" in args.state_weights:
         state_weights = {}
-        for pair in args.state_dist.split(","):
+        for pair in args.state_weights.split(","):
             key, value = pair.split("=")
             state_weights[key.strip()] = float(value.strip())
     else:
-        state_weights = json.loads(args.state_dist)
+        state_weights = json.loads(args.state_weights)
 
     # Load vocab and state mappings
     with open(args.mapping) as f:
@@ -201,9 +281,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Reflective Learning CLI Toolkit",
         epilog="""Example:
-  python -m src.reflective_learning.tools.main train \
-      --input data/train.json \
-      --mapping checkpoints/context/mappings.json \
+  python -m src.reflective_learning.tools.main train \\
+      --input data/train.json \\
+      --mapping checkpoints/context/mappings.json \\
       --epochs 5 --batch-size 16 --lr 1e-4
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -238,28 +318,20 @@ def main():
 
     # --- Generate ---
     gen_parser = subparsers.add_parser("generate", help="Generate sequences")
+    gen_parser.add_argument("--input", type=str, required=True)
+    gen_parser.add_argument("--checkpoint", type=str, required=True)
+    gen_parser.add_argument("--mapping", type=str, required=True)
     gen_parser.add_argument(
-        "--input", type=str, required=True, help="Line-separated JSON input with prefix"
-    )
-    gen_parser.add_argument(
-        "--checkpoint", type=str, required=True, help="Trained model checkpoint"
-    )
-    gen_parser.add_argument(
-        "--mapping", type=str, required=True, help="Path to mappings.json"
-    )
-    gen_parser.add_argument(
-        "--state-dist",
+        "--state-weights",
         type=str,
         required=True,
-        help="State distribution (JSON string, path, or CSV: 'a=0.5,b=0.5')",
+        help="State weights (JSON string, .json path, or CSV: 'a=0.5,b=0.5')",
     )
     gen_parser.add_argument("--max-seq-len", type=int, default=128)
     gen_parser.add_argument("--temperature", type=float, default=1.0)
-    gen_parser.add_argument(
-        "--repeat", type=int, default=1, help="Repeat each input N times"
-    )
+    gen_parser.add_argument("--repeat", type=int, default=1)
     gen_parser.add_argument("--device", type=str, default=None)
-    gen_parser.add_argument("--output", type=str, help="Output path")
+    gen_parser.add_argument("--output", type=str)
     gen_parser.set_defaults(func=run_generate)
 
     args = parser.parse_args()

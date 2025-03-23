@@ -4,24 +4,21 @@ import torch.nn.functional as F
 from reflective_learning.train import collate_with_prefix
 
 
-def normalize_distribution(dist, epsilon=1e-4):
+def normalize_distribution(distribution, epsilon=1e-4):
     """
     Normalize a dictionary of weights, ensuring no entry is zero.
     Adds epsilon to avoid degenerate distributions.
+
+    Args:
+        distribution (dict): mapping from state index → weight
+        epsilon (float): minimum non-zero mass
+
+    Returns:
+        dict: normalized and smoothed distribution
     """
-    adjusted = {k: max(v, epsilon) for k, v in dist.items()}
+    adjusted = {k: max(v, epsilon) for k, v in distribution.items()}
     total = sum(adjusted.values())
     return {k: v / total for k, v in adjusted.items()}
-
-
-def truncate_at_stop(tokens, states):
-    """
-    Truncate tokens/states at the first STOP token (token == 0).
-    """
-    if 0 in tokens:
-        stop_index = tokens.index(0)
-        return tokens[: stop_index + 1], states[: stop_index + 1]
-    return tokens, states
 
 
 def sample_sequence(
@@ -30,55 +27,50 @@ def sample_sequence(
     max_seq_len: int = 128,
     temperature: float = 1.0,
     prefix: torch.Tensor = None,
-    token_ids: torch.LongTensor = None,
-    state_ids: torch.LongTensor = None,
     device: str = "cpu",
     epsilon: float = 1e-6,
 ):
     """
     Generate a token sequence using state-weighted sampling.
     Stops at STOP token (0) or when max_seq_len is reached.
+
+    Args:
+        model: ReflectiveCore model
+        state_weights: dict mapping state index → float
+        max_seq_len: max length to generate
+        temperature: sampling temperature
+        prefix: context prefix embedding [C, d_model] (required)
+        device: computation device
+        epsilon: smoothing factor to avoid zero probs
+
+    Returns:
+        List[int]: sampled token sequence
     """
+    assert prefix is not None, "prefix is required for generation"
+
     model.eval()
     state_weights = normalize_distribution(state_weights)
     state_indices = list(state_weights.keys())
 
-    tokens = token_ids.tolist() if token_ids is not None else []
-    states = state_ids.tolist() if state_ids is not None else []
-
-    # If STOP token already appears, truncate and return early
-    tokens, states = truncate_at_stop(tokens, states)
-    if tokens and tokens[-1] == 0:
-        return tokens
-
-    assert (
-        prefix is not None or len(tokens) > 0
-    ), "Cannot sample: no prefix and no starting tokens provided."
+    tokens = []
+    states = []
 
     with torch.no_grad():
-        for _ in range(max_seq_len - len(tokens)):
-            # Prepare input batch of size 1
-            tok_tensor = torch.tensor(tokens, dtype=torch.long, device=device)
-            sta_tensor = torch.tensor(states, dtype=torch.long, device=device)
+        for _ in range(max_seq_len):
             batch = [
                 {
-                    "token_ids": tok_tensor,
-                    "state_ids": sta_tensor,
-                    "prefix": (
-                        prefix
-                        if prefix is not None
-                        else torch.zeros(0, model.d_model, device=device)
-                    ),
+                    "token_ids": torch.tensor(tokens, dtype=torch.long),
+                    "state_ids": torch.tensor(states, dtype=torch.long),
+                    "prefix": prefix,
                 }
             ]
-
             outputs = collate_with_prefix(batch, model)
             embed, mask = outputs["embed"], outputs["mask"]
 
             logits = model.call(embed.to(device), mask.to(device))  # [1, T, V, S]
             logits = logits[0, -1]  # [V, S]
 
-            # Weighted combination of state-conditioned distributions
+            # Weighted state-conditioned token probabilities
             probs = sum(
                 F.softmax(logits[:, s] / temperature, dim=0) * state_weights[s]
                 for s in state_indices
@@ -88,7 +80,7 @@ def sample_sequence(
 
             next_token = torch.multinomial(probs, num_samples=1).item()
             tokens.append(next_token)
-            states.append(state_indices[0])  # Final state is fixed for now
+            states.append(state_indices[0])  # Use fixed final state for now
 
             if next_token == 0:
                 break
@@ -104,6 +96,14 @@ def sample_multiple_sequences(
 ):
     """
     Sample multiple sequences independently (non-batched).
+
+    Args:
+        model: ReflectiveCore
+        state_weights: dict of state index → float
+        num_sequences: number of sequences to sample
+
+    Returns:
+        List[List[int]]: token sequences
     """
     return [
         sample_sequence(model, state_weights, **kwargs) for _ in range(num_sequences)
@@ -117,42 +117,35 @@ def sample_multiple_sequences_batched(
     max_seq_len: int = 128,
     temperature: float = 1.0,
     prefix: torch.Tensor = None,
-    token_ids: torch.LongTensor = None,
-    state_ids: torch.LongTensor = None,
     device: str = "cpu",
     epsilon: float = 1e-6,
 ):
     """
     Batched version of sampling. Each sequence is generated independently,
     but processed in parallel for speed.
+
+    Args:
+        model: ReflectiveCore
+        state_weights: dict of state index → float
+        num_sequences: number of sequences to sample
+        max_seq_len: max generation length
+        temperature: sampling temperature
+        prefix: shared context prefix embedding [C, d_model] (required)
+        device: computation device
+        epsilon: smoothing factor
+
+    Returns:
+        List[List[int]]: generated token sequences
     """
+    assert prefix is not None, "prefix is required for generation"
+
     model.eval()
     state_weights = normalize_distribution(state_weights)
     state_indices = list(state_weights.keys())
 
-    # Initial tokens/states (can be empty)
-    init_tokens = (
-        token_ids.tolist()
-        if token_ids is not None
-        else [[] for _ in range(num_sequences)]
-    )
-    init_states = (
-        state_ids.tolist()
-        if state_ids is not None
-        else [[] for _ in range(num_sequences)]
-    )
-
-    # Truncate at STOP if already present
-    sequences, state_seqs, finished = [], [], []
-    for t_seq, s_seq in zip(init_tokens, init_states):
-        t_trunc, s_trunc = truncate_at_stop(t_seq, s_seq)
-        sequences.append(t_trunc)
-        state_seqs.append(s_trunc)
-        finished.append(t_trunc and t_trunc[-1] == 0)
-
-    assert prefix is not None or any(
-        len(seq) > 0 for seq in sequences
-    ), "Cannot sample: no prefix and no starting tokens provided."
+    sequences = [[] for _ in range(num_sequences)]
+    states = [[] for _ in range(num_sequences)]
+    finished = [False] * num_sequences
 
     with torch.no_grad():
         for _ in range(max_seq_len):
@@ -168,8 +161,8 @@ def sample_multiple_sequences_batched(
                 padded_tokens[i, : len(sequences[idx])] = torch.tensor(
                     sequences[idx], dtype=torch.long
                 )
-                padded_states[i, : len(state_seqs[idx])] = torch.tensor(
-                    state_seqs[idx], dtype=torch.long
+                padded_states[i, : len(states[idx])] = torch.tensor(
+                    states[idx], dtype=torch.long
                 )
 
             padded_tokens = padded_tokens.to(device)
@@ -179,14 +172,11 @@ def sample_multiple_sequences_batched(
                 {
                     "token_ids": padded_tokens[i],
                     "state_ids": padded_states[i],
-                    "prefix": (
-                        prefix
-                        if prefix is not None
-                        else torch.zeros(0, model.d_model, device=device)
-                    ),
+                    "prefix": prefix,
                 }
                 for i in range(len(active_indices))
             ]
+
             outputs = collate_with_prefix(batch, model)
             embed = outputs["embed"]
             mask = outputs["mask"]
@@ -205,7 +195,7 @@ def sample_multiple_sequences_batched(
 
                 next_token = torch.multinomial(probs, num_samples=1).item()
                 sequences[global_idx].append(next_token)
-                state_seqs[global_idx].append(state_indices[0])
+                states[global_idx].append(state_indices[0])  # fixed final state
 
                 if next_token == 0:
                     finished[global_idx] = True
