@@ -15,12 +15,17 @@ Commands:
 """
 
 import argparse
+import base64
 import json
 
+import torch
+
 from src.reflective_learning import train
-from src.reflective_learning.tools import generate, postprocess, preprocess
+from src.reflective_learning.tools import generate, postprocess
+from src.reflective_learning.tools.encoder import ContextEncoder
 
 
+# === Train ===
 def run_train(args):
     with open(args.mapping) as f:
         mapping = json.load(f)
@@ -46,6 +51,69 @@ def run_train(args):
         dim_feedforward=args.dim_ff,
         num_layers=args.n_layers,
     )
+
+
+# === Preprocess ===
+def run_preprocess(args):
+    with open(args.mapping) as f:
+        mapping = json.load(f)
+
+    vocab_map = mapping["vocab"]
+    state_map = mapping["state"]
+
+    context_encoder = None
+    if args.context_dir:
+        context_encoder = ContextEncoder.from_pretrained(
+            args.context_dir, device=args.device
+        )
+
+    with open(args.input, "r") as fin, open(args.output, "w") as fout:
+        for line_num, line in enumerate(fin, 1):
+            try:
+                example = json.loads(line)
+                output = dict(example)  # preserve all fields
+
+                # Optionally strip token/state
+                if args.prefix_only:
+                    output.pop("token", None)
+                    output.pop("state", None)
+                else:
+                    token_ids = [vocab_map[token] for token in example["token"]]
+                    state_id = state_map[example["state"]]
+                    output["token"] = token_ids
+                    output["state"] = state_id
+
+                # Add prefix if context encoder is provided
+                if context_encoder:
+                    if "text" not in example or "image" not in example:
+                        raise ValueError(
+                            f"Line {line_num}: Missing 'text' or 'image' for context encoding"
+                        )
+                    if not isinstance(example["text"], list):
+                        raise ValueError(
+                            f"Line {line_num}: 'text' must be a list of strings."
+                        )
+                    if not isinstance(example["image"], list):
+                        raise ValueError(
+                            f"Line {line_num}: 'image' must be a list of strings."
+                        )
+
+                    prefix = context_encoder.encode(example["text"], example["image"])
+                    prefix_bytes = (
+                        prefix.to(torch.float32).contiguous().numpy().tobytes()
+                    )
+                    output["prefix"] = base64.b64encode(prefix_bytes).decode("utf-8")
+
+                json.dump(output, fout)
+                fout.write("\n")
+            except KeyError as e:
+                raise KeyError(
+                    f"Line {line_num}: Missing mapping for {e} in vocab/state."
+                ) from e
+            except Exception as e:
+                raise RuntimeError(
+                    f"Line {line_num}: Failed to process line: {e}"
+                ) from e
 
 
 def main():
@@ -103,7 +171,27 @@ def main():
     preprocess_parser = subparsers.add_parser(
         "preprocess", help="Preprocess raw data into context embeddings"
     )
-    preprocess_parser.set_defaults(func=preprocess.main)
+    preprocess_parser.add_argument(
+        "--input", type=str, required=True, help="Path to raw JSON"
+    )
+    preprocess_parser.add_argument(
+        "--output", type=str, required=True, help="Output JSON file"
+    )
+    preprocess_parser.add_argument(
+        "--mapping", type=str, required=True, help="Path to vocab/state mapping JSON"
+    )
+    preprocess_parser.add_argument(
+        "--context-dir", type=str, help="Optional path to context encoder dir"
+    )
+    preprocess_parser.add_argument(
+        "--device", type=str, default="cpu", help="Device to use (cpu or cuda)"
+    )
+    preprocess_parser.add_argument(
+        "--prefix-only",
+        action="store_true",
+        help="If set, strips 'token' and 'state' fields from output and keeps only context + metadata",
+    )
+    preprocess_parser.set_defaults(func=run_preprocess)
 
     # === Generate ===
     generate_parser = subparsers.add_parser(
