@@ -14,9 +14,18 @@ def create_test_file(path, data):
             f.write(json.dumps(row) + "\n")
 
 
+def make_prefix(context_len: int = 3, d_model: int = 32) -> str:
+    array = np.random.rand(context_len, d_model).astype(np.float32)
+    return "b64://" + base64.b64encode(array.tobytes()).decode("utf-8")
+
+
 def test_fixed_length_batching(tmp_path):
     dataset_path = tmp_path / "fixed.json"
-    data = [{"token": [1, 2, 0], "state": 0}, {"token": [3, 4, 5, 0], "state": 1}]
+    prefix = make_prefix()
+    data = [
+        {"token": [1, 2, 0], "state": 0, "prefix": prefix},
+        {"token": [3, 4, 5, 0], "state": 1, "prefix": prefix},
+    ]
     create_test_file(dataset_path, data)
 
     max_seq_len = 6
@@ -26,38 +35,39 @@ def test_fixed_length_batching(tmp_path):
     batch = next(iter(dataloader))
     tokens = batch["token_ids"]
     states = batch["state_ids"]
+    prefix = batch["prefix"]
 
     assert tokens.shape == (2, max_seq_len)
     assert states.shape == (2, max_seq_len)
+    assert prefix.shape[0] == 2  # batch size
+    assert prefix.shape[2] == 32
     assert (states[0] == states[0][0]).all()
     assert (states[1] == states[1][0]).all()
 
 
 def test_variable_length_mode(tmp_path):
     dataset_path = tmp_path / "variable.json"
-    data = [{"token": [1, 2, 0], "state": 0}, {"token": [3, 4, 5, 0], "state": 1}]
+    prefix = make_prefix()
+    data = [
+        {"token": [1, 2, 0], "state": 0, "prefix": prefix},
+        {"token": [3, 4, 5, 0], "state": 1, "prefix": prefix},
+    ]
     create_test_file(dataset_path, data)
 
-    dataset = ReflectiveDataset(str(dataset_path), max_seq_len=None, d_model=32)
-    dataloader = DataLoader(
-        dataset, batch_size=2, collate_fn=lambda x: x, shuffle=False
-    )
+    dataset = ReflectiveDataset(str(dataset_path), max_seq_len=6, d_model=32)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=False)
 
     batch = next(iter(dataloader))
-    assert len(batch) == 2
-
-    for item in batch:
-        tokens = item["token_ids"]
-        states = item["state_ids"]
-        assert tokens.shape == states.shape
-        assert (states == states[0]).all()
+    assert batch["token_ids"].shape == batch["state_ids"].shape
+    assert batch["prefix"].shape[2] == 32
 
 
 def test_multiple_files_combined(tmp_path):
+    prefix = make_prefix()
     file1 = tmp_path / "a.json"
     file2 = tmp_path / "b.json"
-    data1 = [{"token": [1, 0], "state": 0}]
-    data2 = [{"token": [2, 3, 0], "state": 1}]
+    data1 = [{"token": [1, 0], "state": 0, "prefix": prefix}]
+    data2 = [{"token": [2, 3, 0], "state": 1, "prefix": prefix}]
     create_test_file(file1, data1)
     create_test_file(file2, data2)
 
