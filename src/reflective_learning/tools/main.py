@@ -29,7 +29,7 @@ from src.reflective_learning.inference import sample_multiple_sequences_batched
 from src.reflective_learning.model import ReflectiveCore
 
 
-# === ContextEncoder (formerly encoder.py) ===
+# === Context Encoder ===
 class ContextEncoder:
     def __init__(
         self, text_model, image_model, tokenizer, image_processor, device="cpu"
@@ -100,13 +100,15 @@ class ContextEncoder:
         break_dim = self.text_model.config.hidden_size
         break_embed = torch.zeros((1, break_dim), dtype=torch.float32)
 
+        # Add text embeddings
         for t in text:
             segments.append(self.encode_text_embed(t))
-        segments.append(break_embed.clone())  # between text and image
+        segments.append(break_embed.clone())  # break between text and image
 
+        # Add image embeddings
         for path in image:
             segments.append(self.encode_image_embed(path))
-        segments.append(break_embed.clone())  # end of prefix
+        segments.append(break_embed.clone())  # break between context and tokens
 
         return torch.cat(segments, dim=0)
 
@@ -133,9 +135,9 @@ def run_train(args):
         save_path=args.save_path,
         device=args.device,
         d_model=args.d_model,
-        nhead=args.n_heads,
-        dim_feedforward=args.dim_ff,
-        num_layers=args.n_layers,
+        nhead=args.nheads,
+        dim_feedforward=args.dim_feedforward,
+        num_layers=args.num_layers,
     )
 
 
@@ -169,13 +171,18 @@ def run_preprocess(args):
                     output["token"] = token_ids
                     output["state"] = state_id
 
+                # Add prefix
                 if context_encoder:
                     if "text" not in example or "image" not in example:
                         raise ValueError(f"Line {line_num}: Missing 'text' or 'image'")
                     if not isinstance(example["text"], list):
-                        raise ValueError(f"Line {line_num}: 'text' must be a list.")
+                        raise ValueError(
+                            f"Line {line_num}: 'text' must be list of strings."
+                        )
                     if not isinstance(example["image"], list):
-                        raise ValueError(f"Line {line_num}: 'image' must be a list.")
+                        raise ValueError(
+                            f"Line {line_num}: 'image' must be list of strings."
+                        )
 
                     prefix = context_encoder.encode(example["text"], example["image"])
                     prefix_bytes = (
@@ -301,9 +308,9 @@ def main():
     train_parser.add_argument("--save-path", type=str)
     train_parser.add_argument("--device", type=str, default=None)
     train_parser.add_argument("--d-model", type=int, default=768)
-    train_parser.add_argument("--n-layers", type=int, default=12)
-    train_parser.add_argument("--n-heads", type=int, default=12)
-    train_parser.add_argument("--dim-ff", type=int, default=3072)
+    train_parser.add_argument("--num-layers", type=int, default=12)
+    train_parser.add_argument("--nheads", type=int, default=12)
+    train_parser.add_argument("--dim-feedforward", type=int, default=3072)
     train_parser.set_defaults(func=run_train)
 
     # --- Preprocess ---
@@ -318,20 +325,28 @@ def main():
 
     # --- Generate ---
     gen_parser = subparsers.add_parser("generate", help="Generate sequences")
-    gen_parser.add_argument("--input", type=str, required=True)
-    gen_parser.add_argument("--checkpoint", type=str, required=True)
-    gen_parser.add_argument("--mapping", type=str, required=True)
+    gen_parser.add_argument(
+        "--input", type=str, required=True, help="Line-separated JSON input with prefix"
+    )
+    gen_parser.add_argument(
+        "--checkpoint", type=str, required=True, help="Trained model checkpoint"
+    )
+    gen_parser.add_argument(
+        "--mapping", type=str, required=True, help="Path to mappings.json"
+    )
     gen_parser.add_argument(
         "--state-weights",
         type=str,
         required=True,
-        help="State weights (JSON string, .json path, or CSV: 'a=0.5,b=0.5')",
+        help="State weights (JSON string, file path, or CSV: 'a=0.5,b=0.5')",
     )
     gen_parser.add_argument("--max-seq-len", type=int, default=128)
     gen_parser.add_argument("--temperature", type=float, default=1.0)
-    gen_parser.add_argument("--repeat", type=int, default=1)
+    gen_parser.add_argument(
+        "--repeat", type=int, default=1, help="Repeat each input N times"
+    )
     gen_parser.add_argument("--device", type=str, default=None)
-    gen_parser.add_argument("--output", type=str)
+    gen_parser.add_argument("--output", type=str, help="Output path")
     gen_parser.set_defaults(func=run_generate)
 
     args = parser.parse_args()
