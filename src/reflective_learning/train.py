@@ -2,8 +2,8 @@ import os
 
 import torch
 import torch.optim as optim
-import tqdm
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from src.reflective_learning.dataset import ReflectiveDataset
 from src.reflective_learning.model import ReflectiveCore
@@ -26,73 +26,64 @@ def collate_with_prefix(batch, model):
             "state_target": LongTensor [B, T-1],
         }
     """
-    B = len(batch)
+    device = next(model.parameters()).device
     d_model = model.d_model
     V, S = model.vocab_size, model.state_size
 
-    embeds = []  # list of [L_i, d_model]
-    masks = []  # list of [L_i, L_i]
-    token_targets = []  # list of [T-1]
-    state_targets = []  # list of [T-1]
+    embeds, masks = [], []
+    token_targets, state_targets = [], []
     max_len = 0
 
     for example in batch:
-        token_ids = example["token_ids"]  # [T]
-        state_ids = example["state_ids"]  # [T]
-        prefix = example["prefix"]  # [C, d_model]
+        token_ids = example["token_ids"].to(device)  # [T]
+        state_ids = example["state_ids"].to(device)  # [T]
+        prefix = example["prefix"].to(device)  # [C, d_model]
 
         T = token_ids.size(0)
-        x = torch.zeros(T, V, S)  # [T, V, S]
-        x.scatter_(
-            1, token_ids.unsqueeze(-1).unsqueeze(-1), 1.0
-        )  # one-hot in token dim
-        x.scatter_(
-            2, state_ids.unsqueeze(-1).unsqueeze(-2), 1.0
-        )  # one-hot in state dim
+        x = torch.zeros(T, V, S, device=device)  # [T, V, S]
+        x.scatter_(1, token_ids.view(T, 1, 1), 1.0)  # one-hot over tokens
+        x.scatter_(2, state_ids.view(T, 1, 1), 1.0)  # one-hot over states
         x = x.view(T, V * S)  # [T, V*S]
 
         projected = model.input_linear(x)  # [T, d_model]
-        embed = torch.cat([prefix, projected], dim=0)  # [L, d_model] where L = C + T
+        embed = torch.cat([prefix, projected], dim=0)  # [L, d_model]
         embeds.append(embed)
 
         L = embed.size(0)
         max_len = max(max_len, L)
 
-        causal_mask = torch.triu(torch.ones(L, L), diagonal=1).bool()  # [L, L]
-        mask = torch.zeros(L, L).float()  # [L, L]
+        # Causal mask
+        causal_mask = torch.triu(torch.ones(L, L, device=device), diagonal=1).bool()
+        mask = torch.zeros(L, L, device=device)
         mask.masked_fill_(causal_mask, float("-inf"))
         masks.append(mask)
 
         token_targets.append(token_ids[1:])  # [T-1]
         state_targets.append(state_ids[1:])  # [T-1]
 
-    # Pad embeddings and masks to [B, L, d_model] and [B, L, L]
-    padded_embed = torch.zeros(B, max_len, d_model)  # [B, L, d_model]
-    padded_mask = torch.full((B, max_len, max_len), float("-inf"))  # [B, L, L]
+    B = len(batch)
+    padded_embed = torch.zeros(B, max_len, d_model, device=device)
+    padded_mask = torch.full((B, max_len, max_len), float("-inf"), device=device)
 
     for i in range(B):
         L = embeds[i].size(0)
-        padded_embed[i, :L] = embeds[i]  # [L, d_model]
-        padded_mask[i, :L, :L] = masks[i]  # [L, L]
+        padded_embed[i, :L] = embeds[i]
+        padded_mask[i, :L, :L] = masks[i]
 
-    # Pad targets to [B, T-1]
     max_tgt = max(t.size(0) for t in token_targets)
-    padded_tokens = torch.zeros(B, max_tgt, dtype=torch.long)  # [B, T-1]
-    padded_states = torch.zeros(B, max_tgt, dtype=torch.long)  # [B, T-1]
+    padded_tokens = torch.zeros(B, max_tgt, dtype=torch.long, device=device)
+    padded_states = torch.zeros(B, max_tgt, dtype=torch.long, device=device)
 
     for i in range(B):
         padded_tokens[i, : token_targets[i].size(0)] = token_targets[i]
         padded_states[i, : state_targets[i].size(0)] = state_targets[i]
 
     return {
-        "embed": padded_embed,  # [B, L, d_model]
-        "mask": padded_mask,  # [B, L, L]
-        "token_target": padded_tokens,  # [B, T-1]
-        "state_target": padded_states,  # [B, T-1]
+        "embed": padded_embed,
+        "mask": padded_mask,
+        "token_target": padded_tokens,
+        "state_target": padded_states,
     }
-
-
-from tqdm import tqdm
 
 
 def train(
@@ -159,13 +150,12 @@ def train(
 
         print(f"\n🌀 Epoch {epoch + 1}/{epochs}")
 
-        # tqdm progress bar
-        with tqdm(dataloader, desc=f"Training", leave=True, ncols=100) as pbar:
+        with tqdm(dataloader, desc="Training", leave=True, ncols=100) as pbar:
             for step, batch in enumerate(pbar):
-                embed = batch["embed"].to(device)
-                mask = batch["mask"].to(device)
-                token_target = batch["token_target"].to(device)
-                state_target = batch["state_target"].to(device)
+                embed = batch["embed"]
+                mask = batch["mask"]
+                token_target = batch["token_target"]
+                state_target = batch["state_target"]
 
                 logits = model.call(embed, mask=mask)
                 logits = logits[:, -token_target.size(1) - 1 : -1]
@@ -177,9 +167,7 @@ def train(
                 optimizer.step()
 
                 total_loss += loss.item()
-
-                avg_loss_so_far = total_loss / (step + 1)
-                pbar.set_postfix(loss=f"{avg_loss_so_far:.4f}")
+                pbar.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
         print(
             f"📉 Epoch {epoch + 1} complete. Avg loss: {total_loss / num_batches:.4f}"

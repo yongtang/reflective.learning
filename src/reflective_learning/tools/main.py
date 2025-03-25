@@ -243,7 +243,10 @@ def run_generate(args):
                 if "prefix" not in base:
                     raise ValueError("Missing 'prefix' field")
 
-                prefix_bytes = base64.b64decode(base["prefix"])
+                if not base["prefix"].startswith("b64://"):
+                    raise ValueError("Missing 'b64://' in prefix")
+
+                prefix_bytes = base64.b64decode(base["prefix"].removeprefix("b64://"))
                 prefix_tensor = torch.from_numpy(
                     np.frombuffer(prefix_bytes, dtype=np.float32)
                 ).to(device)

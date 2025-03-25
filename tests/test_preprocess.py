@@ -58,8 +58,9 @@ def test_preprocess_with_context(tmp_path):
     assert example["token"] == [0]
     assert example["state"] == 0
     assert "prefix" in example
+    assert example["prefix"].startswith("b64://")
 
-    decoded = base64.b64decode(example["prefix"])
+    decoded = base64.b64decode(example["prefix"].removeprefix("b64://"))
     tensor = torch.from_numpy(np.frombuffer(decoded, dtype=np.float32).copy())
     assert tensor.shape == (4,)
     assert torch.allclose(tensor, torch.tensor([1.0, 2.0, 3.0, 4.0]), rtol=1e-5)
