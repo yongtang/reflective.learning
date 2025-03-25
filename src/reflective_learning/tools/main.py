@@ -143,25 +143,24 @@ def run_train(args):
 
 # === Preprocess ===
 def run_preprocess(args):
+    # Load vocabulary and state mappings
     with open(args.mapping) as f:
         mapping = json.load(f)
-
     vocab_map = mapping["vocab"]
     state_map = mapping["state"]
 
-    context_encoder = None
-    if args.context_dir:
-        context_encoder = ContextEncoder.from_pretrained(
-            args.context_dir, device=args.device
-        )
+    # Context encoder is required to generate prefix embeddings
+    context_encoder = ContextEncoder.from_pretrained(
+        args.context_dir, device=args.device
+    )
 
     with open(args.input, "r") as fin, open(args.output, "w") as fout:
         for line_num, line in enumerate(fin, 1):
             try:
                 example = json.loads(line)
-                output = dict(example)  # preserve all user fields
+                output = dict(example)  # preserve user fields
 
-                # Optionally remove token/state
+                # Optionally strip token/state fields
                 if args.prefix_only:
                     output.pop("token", None)
                     output.pop("state", None)
@@ -171,38 +170,33 @@ def run_preprocess(args):
                     output["token"] = token_ids
                     output["state"] = state_id
 
-                # Add prefix
-                if context_encoder:
-                    if "text" not in example or "image" not in example:
-                        raise ValueError(f"Line {line_num}: Missing 'text' or 'image'")
-                    if not isinstance(example["text"], list):
-                        raise ValueError(
-                            f"Line {line_num}: 'text' must be list of strings."
-                        )
-                    if not isinstance(example["image"], list):
-                        raise ValueError(
-                            f"Line {line_num}: 'image' must be list of strings."
-                        )
-
-                    prefix = context_encoder.encode(example["text"], example["image"])
-                    prefix_bytes = (
-                        prefix.to(torch.float32).contiguous().numpy().tobytes()
+                # Encode prefix from context
+                if "text" not in example or "image" not in example:
+                    raise ValueError(f"Line {line_num}: Missing 'text' or 'image'")
+                if not isinstance(example["text"], list):
+                    raise ValueError(
+                        f"Line {line_num}: 'text' must be a list of strings."
                     )
-                    output["prefix"] = base64.b64encode(prefix_bytes).decode("utf-8")
+                if not isinstance(example["image"], list):
+                    raise ValueError(
+                        f"Line {line_num}: 'image' must be a list of strings."
+                    )
+
+                prefix = context_encoder.encode(example["text"], example["image"])
+                prefix_bytes = prefix.to(torch.float32).contiguous().numpy().tobytes()
+                output["prefix"] = "b64://" + base64.b64encode(prefix_bytes).decode(
+                    "utf-8"
+                )
 
                 json.dump(output, fout)
                 fout.write("\n")
-            except KeyError as e:
-                raise KeyError(f"Line {line_num}: Missing mapping for {e}") from e
             except Exception as e:
-                raise RuntimeError(
-                    f"Line {line_num}: Failed to process line: {e}"
-                ) from e
+                raise RuntimeError(f"Line {line_num}: Failed to process: {e}") from e
 
 
 # === Generate ===
 def run_generate(args):
-    # Load state weights from file, JSON string, or CSV-style input
+    # Load state weights (JSON, file path, or CSV)
     if args.state_weights.endswith(".json"):
         with open(args.state_weights) as f:
             state_weights = json.load(f)
@@ -235,7 +229,7 @@ def run_generate(args):
     model.to(device)
     model.eval()
 
-    # Load input JSONL with prefix
+    # Run generation on each example with prefix
     all_outputs = []
     with open(args.input) as f:
         for line_num, line in enumerate(f, 1):
@@ -318,7 +312,7 @@ def main():
     pre_parser.add_argument("--input", type=str, required=True)
     pre_parser.add_argument("--output", type=str, required=True)
     pre_parser.add_argument("--mapping", type=str, required=True)
-    pre_parser.add_argument("--context-dir", type=str)
+    pre_parser.add_argument("--context-dir", type=str, required=True)
     pre_parser.add_argument("--device", type=str, default="cpu")
     pre_parser.add_argument("--prefix-only", action="store_true")
     pre_parser.set_defaults(func=run_preprocess)
