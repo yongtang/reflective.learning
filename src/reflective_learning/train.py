@@ -90,11 +90,11 @@ def train(
     json_paths,
     vocab_size,
     state_size,
+    save_path,
     max_seq_len,
     epochs=1,
     batch_size=2,
     lr=1e-3,
-    save_path=None,
     device=None,
     d_model=768,
     nhead=12,
@@ -117,8 +117,7 @@ def train(
     )
     print(f"⚙️ Epochs: {epochs}, Batch size: {batch_size}, LR: {lr}")
     print(f"💻 Device: {device}")
-    if save_path:
-        print(f"💾 Will save model to: {save_path}")
+    print(f"💾 Will save model to: {save_path}")
     print()
 
     dataset = ReflectiveDataset(json_paths, max_seq_len=max_seq_len, d_model=d_model)
@@ -173,7 +172,6 @@ def train(
             f"📉 Epoch {epoch + 1} complete. Avg loss: {total_loss / num_batches:.4f}"
         )
 
-    if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        torch.save(model.state_dict(), save_path)
-        print(f"✅ Model saved to: {save_path}")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    torch.save(model.state_dict(), save_path)
+    print(f"✅ Model saved to: {save_path}")

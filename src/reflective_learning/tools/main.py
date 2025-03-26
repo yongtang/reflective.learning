@@ -128,11 +128,11 @@ def run_train(args):
         json_paths=args.input,
         vocab_size=vocab_size,
         state_size=state_size,
+        save_path=args.save_path,
         max_seq_len=args.max_seq_len,
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
-        save_path=args.save_path,
         device=args.device,
         d_model=args.d_model,
         nhead=args.nheads,
@@ -298,11 +298,11 @@ def main():
     train_parser = subparsers.add_parser("train", help="Train a ReflectiveCore model")
     train_parser.add_argument("--input", nargs="+", required=True)
     train_parser.add_argument("--mapping", type=str, required=True)
+    train_parser.add_argument("--save-path", type=str, required=True)
     train_parser.add_argument("--max-seq-len", type=int, default=128)
     train_parser.add_argument("--epochs", type=int, default=10)
     train_parser.add_argument("--batch-size", type=int, default=32)
     train_parser.add_argument("--lr", type=float, default=1e-3)
-    train_parser.add_argument("--save-path", type=str)
     train_parser.add_argument("--device", type=str, default=None)
     train_parser.add_argument("--d-model", type=int, default=768)
     train_parser.add_argument("--num-layers", type=int, default=12)
