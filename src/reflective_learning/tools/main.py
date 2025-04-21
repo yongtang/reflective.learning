@@ -24,9 +24,9 @@ import torch
 from PIL import Image
 from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
-from src.reflective_learning import train
-from src.reflective_learning.inference import sample_multiple_sequences_batched
-from src.reflective_learning.model import ReflectiveCore
+from reflective_learning import train
+from reflective_learning.inference import sample_multiple_sequences_batched
+from reflective_learning.model import ReflectiveCore
 
 
 # === Context Encoder ===

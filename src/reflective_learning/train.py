@@ -5,8 +5,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.reflective_learning.dataset import ReflectiveDataset
-from src.reflective_learning.model import ReflectiveCore
+from reflective_learning.dataset import ReflectiveDataset
+from reflective_learning.model import ReflectiveCore
 
 
 def collate_with_prefix(batch, model):

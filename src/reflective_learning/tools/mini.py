@@ -24,7 +24,6 @@ import os
 import random
 
 import gymnasium as gym
-from minigrid.wrappers import RGBImgObsWrapper
 from PIL import Image
 
 # Action encoding for MiniGrid
