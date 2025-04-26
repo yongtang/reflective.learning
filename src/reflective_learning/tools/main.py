@@ -261,6 +261,7 @@ def run_generate(args):
                         temperature=args.temperature,
                         prefix=prefix_tensor,
                         device=device,
+                        stop_token=args.stop_token,
                     )[0]
 
                     decoded = [id_to_token[tok] for tok in tokens]
@@ -344,6 +345,12 @@ def main():
     )
     gen_parser.add_argument("--device", type=str, default=None)
     gen_parser.add_argument("--output", type=str, help="Output path")
+    gen_parser.add_argument(
+        "--stop-token",
+        type=int,
+        default=None,
+        help="Optional stop token id (default None disables early stopping)",
+    )
     gen_parser.set_defaults(func=run_generate)
 
     args = parser.parse_args()

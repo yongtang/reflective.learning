@@ -29,6 +29,7 @@ def sample_sequence(
     prefix: torch.Tensor = None,
     device: str = "cpu",
     epsilon: float = 1e-6,
+    stop_token: int = None,
 ):
     """
     Generate a token sequence using state-weighted sampling.
@@ -42,7 +43,7 @@ def sample_sequence(
         prefix: context prefix embedding [C, d_model] (required)
         device: computation device
         epsilon: smoothing factor to avoid zero probs
-
+        stop_token: optional stop token id (default None disables)
     Returns:
         List[int]: sampled token sequence
     """
@@ -82,7 +83,7 @@ def sample_sequence(
             tokens.append(next_token)
             states.append(state_indices[0])  # Use fixed final state for now
 
-            if next_token == 0:
+            if stop_token is not None and next_token == stop_token:
                 break
 
     return tokens
@@ -92,6 +93,7 @@ def sample_multiple_sequences(
     model,
     state_weights: dict,
     num_sequences: int = 10,
+    stop_token: int = None,
     **kwargs,
 ):
     """
@@ -106,7 +108,10 @@ def sample_multiple_sequences(
         List[List[int]]: token sequences
     """
     return [
-        sample_sequence(model, state_weights, **kwargs) for _ in range(num_sequences)
+        sample_sequence(
+            model, state_weights, stop_token=stop_token, **kwargs
+        )  # <-- passed stop_token
+        for _ in range(num_sequences)
     ]
 
 
@@ -119,6 +124,7 @@ def sample_multiple_sequences_batched(
     prefix: torch.Tensor = None,
     device: str = "cpu",
     epsilon: float = 1e-6,
+    stop_token: int = None,
 ):
     """
     Batched version of sampling. Each sequence is generated independently,
@@ -133,6 +139,7 @@ def sample_multiple_sequences_batched(
         prefix: shared context prefix embedding [C, d_model] (required)
         device: computation device
         epsilon: smoothing factor
+        stop_token: optional stop token id (default None disables)
 
     Returns:
         List[List[int]]: generated token sequences
@@ -197,7 +204,7 @@ def sample_multiple_sequences_batched(
                 sequences[global_idx].append(next_token)
                 states[global_idx].append(state_indices[0])  # fixed final state
 
-                if next_token == 0:
+                if stop_token is not None and next_token == stop_token:
                     finished[global_idx] = True
 
     return sequences
