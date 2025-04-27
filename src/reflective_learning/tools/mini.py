@@ -14,7 +14,7 @@ Examples:
 ---------
 python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50
 python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --checkpoint path/to/model.pt --state-weights "success=0.99,fail=0.01"
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01" --checkpoint path/to/model.pt
 python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
@@ -30,7 +30,7 @@ import minigrid  # pylint: disable=unused-import
 import numpy as np
 import PIL.Image
 import torch
-from tqdm import tqdm  # <-- added tqdm
+from tqdm import tqdm
 
 from reflective_learning.inference import sample_multiple_sequences_batched
 from reflective_learning.model import ReflectiveCore
@@ -43,14 +43,10 @@ ACTION_MAP = {"left": 0, "right": 1, "forward": 2}
 # Orientation-aware planner using agent_dir
 # ----------------------------------------
 def orientation_aware_planner(start, goal, start_dir=0):
-    """
-    Simulates the MiniGrid agent's orientation and returns
-    a list of "left", "right", "forward" actions to reach the goal.
-    """
     path = []
     x, y = start
     gx, gy = goal
-    dir = start_dir  # 0: right, 1: down, 2: left, 3: up
+    dir = start_dir
 
     def rotate_to(desired_dir, current_dir):
         turns = []
@@ -59,7 +55,6 @@ def orientation_aware_planner(start, goal, start_dir=0):
             current_dir = (current_dir + 1) % 4
         return turns, current_dir
 
-    # Move horizontally
     if gx != x:
         desired = 0 if gx > x else 2
         turns, dir = rotate_to(desired, dir)
@@ -68,7 +63,6 @@ def orientation_aware_planner(start, goal, start_dir=0):
             path.append("forward")
         x = gx
 
-    # Move vertically
     if gy != y:
         desired = 1 if gy > y else 3
         turns, dir = rotate_to(desired, dir)
@@ -90,6 +84,7 @@ def get_random_pos(env):
 # Render and save current environment as image
 # ----------------------------------------
 def render_env_image(env, output_dir, map_id):
+    os.makedirs(output_dir, exist_ok=True)
     img = env.render()
     image = PIL.Image.fromarray(img)
     filename = f"map_{map_id}.png"
@@ -104,10 +99,12 @@ def render_env_image(env, output_dir, map_id):
 def generate_samples(
     env_name, output_json, image_dir, num_samples, include_labels=True
 ):
-    os.makedirs(image_dir, exist_ok=True)
     samples = []
+    progress_desc = (
+        f"Generating Samples ({image_dir})" if image_dir else "Generating Samples"
+    )
 
-    for i in tqdm(range(num_samples), desc="Generating Samples"):
+    for i in tqdm(range(num_samples), desc=progress_desc):
         env = gymnasium.make(env_name, render_mode="rgb_array")
         env.reset()
 
@@ -178,7 +175,6 @@ def predict_tokens(
         model.to(device)
         model.eval()
 
-        # Parse state weights
         state_weights = {}
         for pair in state_weights_str.split(","):
             key, value = pair.split("=")
@@ -313,7 +309,7 @@ def main():
     parser.add_argument("--env", default="MiniGrid-Empty-8x8-v0")
     parser.add_argument("--input", help="Input JSON file")
     parser.add_argument("--output", help="Output JSON file")
-    parser.add_argument("--image_dir", default="images")
+    parser.add_argument("--image", default="image")
     parser.add_argument("--samples", type=int, default=10)
     parser.add_argument("--episodes", type=int, default=20)
     parser.add_argument("--timesteps", type=int, default=100_000)
@@ -331,13 +327,13 @@ def main():
     if args.mode == "seed":
         assert args.output, "--output is required for --mode seed"
         generate_samples(
-            args.env, args.output, args.image_dir, args.samples, include_labels=True
+            args.env, args.output, args.image, args.samples, include_labels=True
         )
 
     elif args.mode == "stub":
         assert args.output, "--output is required for --mode stub"
         generate_samples(
-            args.env, args.output, args.image_dir, args.samples, include_labels=False
+            args.env, args.output, args.image, args.samples, include_labels=False
         )
 
     elif args.mode == "predict":
