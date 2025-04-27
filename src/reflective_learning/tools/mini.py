@@ -14,9 +14,7 @@ Examples:
 ---------
 python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50
 python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01"
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --checkpoint path/to/model.pt
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --checkpoint path/to/model.pt --state-weights "success=0.99,fail=0.01"
 python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
@@ -32,6 +30,7 @@ import minigrid  # pylint: disable=unused-import
 import numpy as np
 import PIL.Image
 import torch
+from tqdm import tqdm  # <-- added tqdm
 
 from reflective_learning.inference import sample_multiple_sequences_batched
 from reflective_learning.model import ReflectiveCore
@@ -108,7 +107,7 @@ def generate_samples(
     os.makedirs(image_dir, exist_ok=True)
     samples = []
 
-    for i in range(num_samples):
+    for i in tqdm(range(num_samples), desc="Generating Samples"):
         env = gymnasium.make(env_name, render_mode="rgb_array")
         env.reset()
 
@@ -189,7 +188,7 @@ def predict_tokens(
             state_weights[state_id] = value
 
         predictions = []
-        for sample in samples:
+        for sample in tqdm(samples, desc="Predicting Tokens"):
             prefix_field = sample.get("prefix")
             if not prefix_field or not prefix_field.startswith("b64://"):
                 raise ValueError(
@@ -246,7 +245,7 @@ def validate_output(input_json, output_json, env_name):
         samples = [json.loads(line) for line in f]
 
     validated = []
-    for sample in samples:
+    for sample in tqdm(samples, desc="Validating Outputs"):
         assert "token" in sample, f"Missing 'token' in sample: {sample}"
         env = gymnasium.make(env_name, render_mode="rgb_array")
         sample["state"] = replay(env, sample["token"])
@@ -280,7 +279,7 @@ def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=N
     eval_env = gymnasium.make(env_name, render_mode="rgb_array")
     success, fail = 0, 0
 
-    for _ in range(eval_episodes):
+    for _ in tqdm(range(eval_episodes), desc="Evaluating PPO"):
         obs, _ = eval_env.reset()
         done = False
         while not done:
