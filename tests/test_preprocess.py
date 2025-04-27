@@ -40,9 +40,10 @@ def test_preprocess_with_context(tmp_path):
         input=str(input_path),
         output=str(output_path),
         mapping=str(mapping_path),
-        context_dir="mock",  # triggers mock below
+        context_dir="mock",
         device="cpu",
         prefix_only=False,
+        image="image",
     )
 
     # Inject dummy encoder
@@ -91,6 +92,7 @@ def test_preprocess_context_missing_fields(tmp_path):
         context_dir="mock",
         device="cpu",
         prefix_only=False,
+        image="image",
     )
 
     from src.reflective_learning.tools import main
@@ -130,7 +132,8 @@ def test_preprocess_prefix_only_mode(tmp_path):
         mapping=str(mapping_path),
         context_dir="mock",
         device="cpu",
-        prefix_only=True,  # <- only prefix and original fields should remain
+        prefix_only=True,
+        image="image",
     )
 
     from src.reflective_learning.tools import main

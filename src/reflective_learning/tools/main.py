@@ -10,7 +10,9 @@ Run with:
 Commands:
     train         Train a ReflectiveCore model from token/state sequences
     preprocess    Convert raw JSON with text/images into numerical embeddings
+                  (supports --image to resolve image directory, shows tqdm progress)
     generate      Sample sequences from a trained model
+                  (shows tqdm progress)
 """
 
 import argparse
@@ -22,6 +24,7 @@ from functools import lru_cache
 import numpy as np
 import torch
 from PIL import Image
+from tqdm import tqdm
 from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
 from reflective_learning import train
@@ -38,11 +41,7 @@ class ContextEncoder:
         assert image_model is not None, "image_model is required"
         assert tokenizer is not None, "tokenizer is required"
         assert image_processor is not None, "image_processor is required"
-
-        assert text_model.config.hidden_size == image_model.config.hidden_size, (
-            f"Text model (hidden={text_model.config.hidden_size}) and image model "
-            f"(hidden={image_model.config.hidden_size}) must match."
-        )
+        assert text_model.config.hidden_size == image_model.config.hidden_size
 
         self.text_model = text_model.to(device)
         self.image_model = image_model.to(device)
@@ -77,10 +76,9 @@ class ContextEncoder:
     def encode_text_embed(self, text: str) -> torch.Tensor:
         inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
         input_ids = inputs["input_ids"].to(self.device)
-
         with torch.no_grad():
             output = self.text_model(input_ids=input_ids)
-            return output.last_hidden_state.squeeze(0).detach().cpu()  # shape [T, D]
+            return output.last_hidden_state.squeeze(0).detach().cpu()
 
     @lru_cache(maxsize=1024)
     def encode_image_embed(self, image_path: str) -> torch.Tensor:
@@ -88,27 +86,23 @@ class ContextEncoder:
         pixel_values = self.image_processor(
             images=image, return_tensors="pt"
         ).pixel_values.to(self.device)
-
         with torch.no_grad():
             output = self.image_model(pixel_values=pixel_values)
-            return output.last_hidden_state.squeeze(0).detach().cpu()  # shape [I, D]
+            return output.last_hidden_state.squeeze(0).detach().cpu()
 
     def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
         segments = []
+        break_embed = torch.zeros(
+            (1, self.text_model.config.hidden_size), dtype=torch.float32
+        )
 
-        # Always create break embedding
-        break_dim = self.text_model.config.hidden_size
-        break_embed = torch.zeros((1, break_dim), dtype=torch.float32)
-
-        # Add text embeddings
         for t in text:
             segments.append(self.encode_text_embed(t))
-        segments.append(break_embed.clone())  # break between text and image
+        segments.append(break_embed.clone())
 
-        # Add image embeddings
         for path in image:
             segments.append(self.encode_image_embed(path))
-        segments.append(break_embed.clone())  # break between context and tokens
+        segments.append(break_embed.clone())
 
         return torch.cat(segments, dim=0)
 
@@ -143,24 +137,23 @@ def run_train(args):
 
 # === Preprocess ===
 def run_preprocess(args):
-    # Load vocabulary and state mappings
     with open(args.mapping) as f:
         mapping = json.load(f)
     vocab_map = mapping["vocab"]
     state_map = mapping["state"]
 
-    # Context encoder is required to generate prefix embeddings
     context_encoder = ContextEncoder.from_pretrained(
         args.context_dir, device=args.device
     )
 
     with open(args.input, "r") as fin, open(args.output, "w") as fout:
-        for line_num, line in enumerate(fin, 1):
+        for line_num, line in enumerate(
+            tqdm(fin, desc="Preprocessing"), 1
+        ):  # FIX: read and write inside open
             try:
                 example = json.loads(line)
-                output = dict(example)  # preserve user fields
+                output = dict(example)
 
-                # Optionally strip token/state fields
                 if args.prefix_only:
                     output.pop("token", None)
                     output.pop("state", None)
@@ -170,7 +163,6 @@ def run_preprocess(args):
                     output["token"] = token_ids
                     output["state"] = state_id
 
-                # Encode prefix from context
                 if "text" not in example or "image" not in example:
                     raise ValueError(f"Line {line_num}: Missing 'text' or 'image'")
                 if not isinstance(example["text"], list):
@@ -182,7 +174,10 @@ def run_preprocess(args):
                         f"Line {line_num}: 'image' must be a list of strings."
                     )
 
-                prefix = context_encoder.encode(example["text"], example["image"])
+                resolved_images = [
+                    os.path.join(args.image, img_name) for img_name in example["image"]
+                ]
+                prefix = context_encoder.encode(example["text"], resolved_images)
                 prefix_bytes = prefix.to(torch.float32).contiguous().numpy().tobytes()
                 output["prefix"] = "b64://" + base64.b64encode(prefix_bytes).decode(
                     "utf-8"
@@ -196,7 +191,6 @@ def run_preprocess(args):
 
 # === Generate ===
 def run_generate(args):
-    # Load state weights (JSON, file path, or CSV)
     if args.state_weights.endswith(".json"):
         with open(args.state_weights) as f:
             state_weights = json.load(f)
@@ -208,7 +202,6 @@ def run_generate(args):
     else:
         state_weights = json.loads(args.state_weights)
 
-    # Load vocab and state mappings
     with open(args.mapping) as f:
         mapping = json.load(f)
     vocab_map = mapping["vocab"]
@@ -216,7 +209,6 @@ def run_generate(args):
     id_to_token = {v: k for k, v in vocab_map.items()}
     state_weights = {state_map[k]: v for k, v in state_weights.items()}
 
-    # Load model
     model = ReflectiveCore(
         vocab_size=len(vocab_map),
         state_size=len(state_map),
@@ -229,10 +221,11 @@ def run_generate(args):
     model.to(device)
     model.eval()
 
-    # Run generation on each example with prefix
     all_outputs = []
     with open(args.input) as f:
-        for line_num, line in enumerate(f, 1):
+        for line_num, line in enumerate(
+            tqdm(f, desc="Generating"), 1
+        ):  # FIX: read with tqdm directly
             try:
                 base = json.loads(line)
 
@@ -319,38 +312,23 @@ def main():
     pre_parser.add_argument("--context-dir", type=str, required=True)
     pre_parser.add_argument("--device", type=str, default="cpu")
     pre_parser.add_argument("--prefix-only", action="store_true")
+    pre_parser.add_argument(
+        "--image", type=str, default="image", help="Image directory (default: image)"
+    )
     pre_parser.set_defaults(func=run_preprocess)
 
     # --- Generate ---
     gen_parser = subparsers.add_parser("generate", help="Generate sequences")
-    gen_parser.add_argument(
-        "--input", type=str, required=True, help="Line-separated JSON input with prefix"
-    )
-    gen_parser.add_argument(
-        "--checkpoint", type=str, required=True, help="Trained model checkpoint"
-    )
-    gen_parser.add_argument(
-        "--mapping", type=str, required=True, help="Path to mappings.json"
-    )
-    gen_parser.add_argument(
-        "--state-weights",
-        type=str,
-        required=True,
-        help="State weights (JSON string, file path, or CSV: 'a=0.5,b=0.5')",
-    )
+    gen_parser.add_argument("--input", type=str, required=True)
+    gen_parser.add_argument("--checkpoint", type=str, required=True)
+    gen_parser.add_argument("--mapping", type=str, required=True)
+    gen_parser.add_argument("--state-weights", type=str, required=True)
     gen_parser.add_argument("--max-seq-len", type=int, default=128)
     gen_parser.add_argument("--temperature", type=float, default=1.0)
-    gen_parser.add_argument(
-        "--repeat", type=int, default=1, help="Repeat each input N times"
-    )
+    gen_parser.add_argument("--repeat", type=int, default=1)
     gen_parser.add_argument("--device", type=str, default=None)
     gen_parser.add_argument("--output", type=str, help="Output path")
-    gen_parser.add_argument(
-        "--stop-token",
-        type=int,
-        default=None,
-        help="Optional stop token id (default None disables early stopping)",
-    )
+    gen_parser.add_argument("--stop-token", type=int, default=None)
     gen_parser.set_defaults(func=run_generate)
 
     args = parser.parse_args()
