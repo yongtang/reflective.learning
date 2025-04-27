@@ -6,7 +6,7 @@ Modes:
 --mode seed       : Generate labeled samples (with tokens and success state)
 --mode stub       : Generate input-only samples (text + image) for Reflective model
 --mode predict    : Use model (default or Reflective) to predict action sequences
-                    (optionally specify --state-weights like "success=0.8,fail=0.2")
+                    (optionally specify --state-weights like "success=0.99,fail=0.01" and --checkpoint)
 --mode verify     : Validate predicted tokens via environment replay (adds "state")
 --mode baseline   : Train PPO using stable-baselines3, then evaluate performance
 
@@ -16,6 +16,7 @@ python -m src.reflective_learning.tools.mini --mode seed --output seed.json --sa
 python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50
 python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective
 python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01"
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --checkpoint path/to/model.pt
 python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
@@ -154,6 +155,7 @@ def predict_tokens(
     output_json,
     model_type="minigrid",
     state_weights_str="success=0.99,fail=0.01",
+    checkpoint_path=None,
 ):
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -164,13 +166,15 @@ def predict_tokens(
 
         model = ReflectiveCore(
             vocab_size=len(vocab_map),
-            state_size=2,  # success/fail
+            state_size=2,
             max_seq_len=128,
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        base_dir = os.path.dirname(input_json)
-        checkpoint_path = os.path.join(base_dir, "model.pt")
+        if checkpoint_path is None:
+            base_dir = os.path.dirname(input_json)
+            checkpoint_path = os.path.join(base_dir, "model.pt")
+
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
         model.to(device)
         model.eval()
@@ -212,7 +216,7 @@ def predict_tokens(
             decoded = [id_to_token[tok] for tok in tokens]
             predictions.append(decoded)
     else:
-        predictions = [["forward"] * 5 for _ in samples]  # Dummy fallback
+        predictions = [["forward"] * 5 for _ in samples]
 
     for sample, tokens in zip(samples, predictions):
         sample["token"] = tokens
@@ -307,36 +311,20 @@ def main():
         choices=["seed", "stub", "predict", "verify", "baseline"],
         help="Which pipeline stage to run",
     )
-
-    parser.add_argument(
-        "--env", default="MiniGrid-Empty-8x8-v0", help="MiniGrid environment ID"
-    )
+    parser.add_argument("--env", default="MiniGrid-Empty-8x8-v0")
     parser.add_argument("--input", help="Input JSON file")
     parser.add_argument("--output", help="Output JSON file")
+    parser.add_argument("--image_dir", default="images")
+    parser.add_argument("--samples", type=int, default=10)
+    parser.add_argument("--episodes", type=int, default=20)
+    parser.add_argument("--timesteps", type=int, default=100_000)
+    parser.add_argument("--save_model")
     parser.add_argument(
-        "--image_dir", default="images", help="Directory for saved images"
+        "--model", default="minigrid", choices=["minigrid", "reflective"]
     )
+    parser.add_argument("--state-weights", type=str, default="success=0.99,fail=0.01")
     parser.add_argument(
-        "--samples", type=int, default=10, help="Number of maps to generate"
-    )
-    parser.add_argument(
-        "--episodes", type=int, default=20, help="Episodes to evaluate PPO"
-    )
-    parser.add_argument(
-        "--timesteps", type=int, default=100_000, help="Training steps for PPO"
-    )
-    parser.add_argument("--save_model", help="Filename to save trained PPO model")
-    parser.add_argument(
-        "--model",
-        default="minigrid",
-        choices=["minigrid", "reflective"],
-        help="Model to use for --mode predict",
-    )
-    parser.add_argument(
-        "--state-weights",
-        type=str,
-        default="success=1.0",
-        help="State weights (CSV like 'success=0.8,fail=0.2') for reflective model",
+        "--checkpoint", type=str, help="Checkpoint path for reflective model"
     )
 
     args = parser.parse_args()
@@ -362,6 +350,7 @@ def main():
             args.output,
             model_type=args.model,
             state_weights_str=args.state_weights,
+            checkpoint_path=args.checkpoint,
         )
 
     elif args.mode == "verify":
