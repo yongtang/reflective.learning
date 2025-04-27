@@ -12,12 +12,13 @@ dependencies = [
 [project.optional-dependencies]
 test = [
     "pytest",
-    "tiktoken",
     "torchvision",
     "transformers",
     "huggingface_hub",
     "requests",
-    "tqdm"
+    "tqdm",
+    "gymnasium",
+    "minigrid",
 ]
 
 [build-system]

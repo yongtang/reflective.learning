@@ -23,8 +23,9 @@ import json
 import os
 import random
 
-import gymnasium as gym
-from PIL import Image
+import gymnasium
+import minigrid  # pylint: disable=unused-import
+import PIL.Image
 
 # Action encoding for MiniGrid
 ACTION_MAP = {"left": 0, "right": 1, "forward": 2}
@@ -82,7 +83,7 @@ def get_random_pos(env):
 # ----------------------------------------
 def render_env_image(env, output_dir, map_id):
     img = env.render()
-    image = Image.fromarray(img)
+    image = PIL.Image.fromarray(img)
     filename = f"map_{map_id}.png"
     path = os.path.join(output_dir, filename)
     image.save(path)
@@ -99,7 +100,7 @@ def generate_samples(
     samples = []
 
     for i in range(num_samples):
-        env = gym.make(env_name, render_mode="rgb_array")
+        env = gymnasium.make(env_name, render_mode="rgb_array")
         env.reset()
 
         # Randomize start/goal
@@ -188,7 +189,7 @@ def validate_output(input_json, output_json, env_name):
     validated = []
     for sample in samples:
         assert "token" in sample, f"Missing 'token' in sample: {sample}"
-        env = gym.make(env_name, render_mode="rgb_array")
+        env = gymnasium.make(env_name, render_mode="rgb_array")
         sample["state"] = replay(env, sample["token"])
         validated.append(sample)
 
@@ -207,7 +208,7 @@ def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=N
     from stable_baselines3.common.env_util import make_vec_env
 
     def make_env():
-        return gym.make(env_name, render_mode="rgb_array")
+        return gymnasium.make(env_name, render_mode="rgb_array")
 
     env = make_vec_env(make_env, n_envs=4)
     model = PPO("CnnPolicy", env, verbose=1)
@@ -217,7 +218,7 @@ def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=N
         model.save(save_path)
         print(f"✅ Saved PPO model to {save_path}")
 
-    eval_env = gym.make(env_name, render_mode="rgb_array")
+    eval_env = gymnasium.make(env_name, render_mode="rgb_array")
     success, fail = 0, 0
 
     for _ in range(eval_episodes):
