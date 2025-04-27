@@ -1,7 +1,9 @@
 import torch
 
 from src.reflective_learning.inference import (
-    sample_multiple_sequences, sample_multiple_sequences_batched)
+    sample_multiple_sequences,
+    sample_multiple_sequences_batched,
+)
 from src.reflective_learning.model import ReflectiveCore
 
 

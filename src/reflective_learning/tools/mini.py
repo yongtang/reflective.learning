@@ -6,6 +6,7 @@ Modes:
 --mode seed       : Generate labeled samples (with tokens and success state)
 --mode stub       : Generate input-only samples (text + image) for Reflective model
 --mode predict    : Use model (default or Reflective) to predict action sequences
+                    (optionally specify --state-weights like "success=0.8,fail=0.2")
 --mode verify     : Validate predicted tokens via environment replay (adds "state")
 --mode baseline   : Train PPO using stable-baselines3, then evaluate performance
 
@@ -14,18 +15,25 @@ Examples:
 python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50
 python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50
 python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01"
 python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
 
 import argparse
+import base64
 import json
 import os
 import random
 
 import gymnasium
 import minigrid  # pylint: disable=unused-import
+import numpy as np
 import PIL.Image
+import torch
+
+from reflective_learning.inference import sample_multiple_sequences_batched
+from reflective_learning.model import ReflectiveCore
 
 # Action encoding for MiniGrid
 ACTION_MAP = {"left": 0, "right": 1, "forward": 2}
@@ -103,13 +111,11 @@ def generate_samples(
         env = gymnasium.make(env_name, render_mode="rgb_array")
         env.reset()
 
-        # Randomize start/goal
         start = get_random_pos(env.unwrapped)
         goal = get_random_pos(env.unwrapped)
         while goal == start:
             goal = get_random_pos(env.unwrapped)
 
-        # Set agent in environment
         env.unwrapped.agent_pos = list(start)
         agent_dir = random.randint(0, 3)
         env.unwrapped.agent_dir = agent_dir
@@ -143,19 +149,68 @@ def generate_samples(
 # ----------------------------------------
 # Predict token sequence using a model
 # ----------------------------------------
-def predict_tokens(input_json, output_json, model_type="minigrid"):
+def predict_tokens(
+    input_json,
+    output_json,
+    model_type="minigrid",
+    state_weights_str="success=0.99,fail=0.01",
+):
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
 
-    image_paths = [sample["image"][0] for sample in samples]
-    texts = [sample["text"] for sample in samples]
-
     if model_type == "reflective":
-        assert (
-            "ReflectiveTransformerModel" in globals()
-        ), "ReflectiveTransformerModel must be defined."
-        model = ReflectiveTransformerModel()
-        predictions = model.generate(image_paths, texts)
+        vocab_map = ACTION_MAP
+        id_to_token = {v: k for k, v in vocab_map.items()}
+
+        model = ReflectiveCore(
+            vocab_size=len(vocab_map),
+            state_size=2,  # success/fail
+            max_seq_len=128,
+        )
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        base_dir = os.path.dirname(input_json)
+        checkpoint_path = os.path.join(base_dir, "model.pt")
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        model.to(device)
+        model.eval()
+
+        # Parse state weights
+        state_weights = {}
+        for pair in state_weights_str.split(","):
+            key, value = pair.split("=")
+            key = key.strip().lower()
+            value = float(value.strip())
+            state_id = 0 if key == "success" else 1
+            state_weights[state_id] = value
+
+        predictions = []
+        for sample in samples:
+            prefix_field = sample.get("prefix")
+            if not prefix_field or not prefix_field.startswith("b64://"):
+                raise ValueError(
+                    "Missing or invalid 'prefix' field for reflective model."
+                )
+
+            prefix_bytes = base64.b64decode(prefix_field.removeprefix("b64://"))
+            prefix_tensor = torch.from_numpy(
+                np.frombuffer(prefix_bytes, dtype=np.float32)
+            ).to(device)
+            prefix_tensor = prefix_tensor.view(-1, model.d_model)
+
+            tokens = sample_multiple_sequences_batched(
+                model=model,
+                state_weights=state_weights,
+                num_sequences=1,
+                max_seq_len=128,
+                temperature=1.0,
+                prefix=prefix_tensor,
+                device=device,
+                stop_token=None,
+            )[0]
+
+            decoded = [id_to_token[tok] for tok in tokens]
+            predictions.append(decoded)
     else:
         predictions = [["forward"] * 5 for _ in samples]  # Dummy fallback
 
@@ -277,6 +332,12 @@ def main():
         choices=["minigrid", "reflective"],
         help="Model to use for --mode predict",
     )
+    parser.add_argument(
+        "--state-weights",
+        type=str,
+        default="success=1.0",
+        help="State weights (CSV like 'success=0.8,fail=0.2') for reflective model",
+    )
 
     args = parser.parse_args()
 
@@ -296,7 +357,12 @@ def main():
         assert (
             args.input and args.output
         ), "--input and --output are required for --mode predict"
-        predict_tokens(args.input, args.output, model_type=args.model)
+        predict_tokens(
+            args.input,
+            args.output,
+            model_type=args.model,
+            state_weights_str=args.state_weights,
+        )
 
     elif args.mode == "verify":
         assert (
