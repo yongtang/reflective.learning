@@ -11,11 +11,11 @@ Modes:
 
 Examples:
 ---------
-python minigrid_model_pipeline.py --mode seed --output seed.json --samples 50
-python minigrid_model_pipeline.py --mode stub --output stub.json --samples 50
-python minigrid_model_pipeline.py --mode predict --input stub.json --output predicted.json --model reflective
-python minigrid_model_pipeline.py --mode verify --input predicted.json --output verified.json
-python minigrid_model_pipeline.py --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
+python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50
+python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective
+python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json
+python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
 
 import argparse
