@@ -3,19 +3,19 @@ MiniGrid Model Pipeline — Reflective Learning + RL Benchmarking
 
 Modes:
 ------
---mode seed       : Generate labeled samples (with tokens and success state)
---mode stub       : Generate input-only samples (text + image) for Reflective model
+--mode seed       : Generate labeled samples (text + image + facing + tokens + success state)
+--mode stub       : Generate input-only samples (text + image + facing) for Reflective model
 --mode predict    : Use model (default or Reflective) to predict action sequences
                     (optionally specify --state-weights like "success=0.99,fail=0.01" and --checkpoint)
---mode verify     : Validate predicted tokens via environment replay (adds "state")
+--mode verify     : Validate predicted tokens via environment replay (uses start_pos and facing)
 --mode baseline   : Train PPO using stable-baselines3, then evaluate performance
 
 Examples:
 ---------
-python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50
-python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50
+python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50 --image image
+python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50 --image image
 python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01" --checkpoint path/to/model.pt
-python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json
+python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json --image image
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
 
@@ -37,6 +37,8 @@ from reflective_learning.model import ReflectiveCore
 
 # Action encoding for MiniGrid
 ACTION_MAP = {"left": 0, "right": 1, "forward": 2}
+DIR_TO_STR = {0: "right", 1: "down", 2: "left", 3: "up"}
+STR_TO_DIR = {v: k for k, v in DIR_TO_STR.items()}
 
 
 # ----------------------------------------
@@ -120,11 +122,15 @@ def generate_samples(
         image_filename = render_env_image(env, image_dir, i)
 
         sample = {
-            "text": [f"start {start[0]},{start[1]}", f"stop {goal[0]},{goal[1]}"],
+            "text": [
+                f"start {start[0]},{start[1]}",
+                f"stop {goal[0]},{goal[1]}",
+                f"facing {DIR_TO_STR[agent_dir]}",
+            ],
             "image": [image_filename],
             "start_pos": list(start),
             "goal_pos": list(goal),
-            "map_id": i,
+            "facing": DIR_TO_STR[agent_dir],
         }
 
         if include_labels:
@@ -226,9 +232,12 @@ def predict_tokens(
 # ----------------------------------------
 # Validate action sequence by replaying in MiniGrid
 # ----------------------------------------
-def validate_output(input_json, output_json, env_name):
-    def replay(env, token_seq):
+def validate_output(input_json, output_json, env_name, image_dir):
+    def replay(env, token_seq, start_pos, facing_str):
         env.reset()
+        env.unwrapped.agent_pos = list(start_pos)
+        env.unwrapped.agent_dir = STR_TO_DIR[facing_str]
+
         for token in token_seq:
             assert token in ACTION_MAP, f"Invalid token: {token}"
             action = ACTION_MAP[token]
@@ -243,8 +252,14 @@ def validate_output(input_json, output_json, env_name):
     validated = []
     for sample in tqdm(samples, desc="Validating Outputs"):
         assert "token" in sample, f"Missing 'token' in sample: {sample}"
+        assert (
+            "start_pos" in sample and "facing" in sample
+        ), "Missing start_pos or facing"
+
         env = gymnasium.make(env_name, render_mode="rgb_array")
-        sample["state"] = replay(env, sample["token"])
+        sample["state"] = replay(
+            env, sample["token"], sample["start_pos"], sample["facing"]
+        )
         validated.append(sample)
 
     with open(output_json, "w") as f:
@@ -352,7 +367,7 @@ def main():
         assert (
             args.input and args.output
         ), "--input and --output are required for --mode verify"
-        validate_output(args.input, args.output, args.env)
+        validate_output(args.input, args.output, args.env, args.image)
 
     elif args.mode == "baseline":
         train_and_evaluate_ppo(
