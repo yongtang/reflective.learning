@@ -108,9 +108,7 @@ def sample_multiple_sequences(
         List[List[int]]: token sequences
     """
     return [
-        sample_sequence(
-            model, state_weights, stop_token=stop_token, **kwargs
-        )  # <-- passed stop_token
+        sample_sequence(model, state_weights, stop_token=stop_token, **kwargs)
         for _ in range(num_sequences)
     ]
 
@@ -121,7 +119,7 @@ def sample_multiple_sequences_batched(
     num_sequences: int = 10,
     max_seq_len: int = 128,
     temperature: float = 1.0,
-    prefix: torch.Tensor = None,
+    prefixes: torch.Tensor = None,
     device: str = "cpu",
     epsilon: float = 1e-6,
     stop_token: int = None,
@@ -136,7 +134,7 @@ def sample_multiple_sequences_batched(
         num_sequences: number of sequences to sample
         max_seq_len: max generation length
         temperature: sampling temperature
-        prefix: shared context prefix embedding [C, d_model] (required)
+        prefixes: batch of prefix embeddings [B, C, d_model] (required)
         device: computation device
         epsilon: smoothing factor
         stop_token: optional stop token id (default None disables)
@@ -144,15 +142,18 @@ def sample_multiple_sequences_batched(
     Returns:
         List[List[int]]: generated token sequences
     """
-    assert prefix is not None, "prefix is required for generation"
+    assert prefixes is not None, "prefixes is required for generation"
+    assert prefixes.dim() == 3, "prefixes must have shape [B, C, d_model]"
 
     model.eval()
     state_weights = normalize_distribution(state_weights)
     state_indices = list(state_weights.keys())
 
-    sequences = [[] for _ in range(num_sequences)]
-    states = [[] for _ in range(num_sequences)]
-    finished = [False] * num_sequences
+    batch_size = prefixes.size(0)
+
+    sequences = [[] for _ in range(batch_size)]
+    states = [[] for _ in range(batch_size)]
+    finished = [False] * batch_size
 
     with torch.no_grad():
         for _ in range(max_seq_len):
@@ -179,9 +180,9 @@ def sample_multiple_sequences_batched(
                 {
                     "token_ids": padded_tokens[i],
                     "state_ids": padded_states[i],
-                    "prefix": prefix,
+                    "prefix": prefixes[idx],  # <-- each sequence gets its own prefix
                 }
-                for i in range(len(active_indices))
+                for i, idx in enumerate(active_indices)
             ]
 
             outputs = collate_with_prefix(batch, model)

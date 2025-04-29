@@ -4,15 +4,31 @@ Reflective Learning CLI Toolkit
 This script provides a command-line interface for working with ReflectiveCore models,
 including training, preprocessing context data, and generating sequences.
 
-Run with:
-    python -m src.reflective_learning.tools.main <command> [options]
-
 Commands:
-    train         Train a ReflectiveCore model from token/state sequences
-    preprocess    Convert raw JSON with text/images into numerical embeddings
-                  (supports --image to resolve image directory, shows tqdm progress)
-    generate      Sample sequences from a trained model
-                  (shows tqdm progress)
+---------
+train
+    Train a ReflectiveCore model from token/state sequences.
+    Supports configurable model size, optimizer settings, and device placement.
+
+preprocess
+    Convert raw JSON files with text/images into numerical embeddings for model input.
+    Produces prefix embeddings and optionally token/state mappings.
+    Supports batch progress display with tqdm.
+
+generate
+    Sample token sequences from a trained ReflectiveCore model.
+    Supports prefix-based conditional generation and custom state weighting.
+
+Examples:
+---------
+# Train a model
+python -m src.reflective_learning.tools.main train --input data/train.json --mapping checkpoints/context/mappings.json --save-path checkpoints/model.pt --epochs 5 --batch-size 16 --lr 1e-4
+
+# Preprocess input data
+python -m src.reflective_learning.tools.main preprocess --input raw.json --output processed.json --mapping checkpoints/context/mappings.json --context-dir checkpoints/context --image image_dir
+
+# Generate sequences from a trained model
+python -m src.reflective_learning.tools.main generate --input processed.json --checkpoint checkpoints/model.pt --mapping checkpoints/context/mappings.json --state-weights "success=0.9,fail=0.1" --output generated.json --repeat 5
 """
 
 import argparse
@@ -147,9 +163,7 @@ def run_preprocess(args):
     )
 
     with open(args.input, "r") as fin, open(args.output, "w") as fout:
-        for line_num, line in enumerate(
-            tqdm(fin, desc="Preprocessing"), 1
-        ):  # FIX: read and write inside open
+        for line_num, line in enumerate(tqdm(fin, desc="Preprocessing"), 1):
             try:
                 example = json.loads(line)
                 output = dict(example)
@@ -223,9 +237,7 @@ def run_generate(args):
 
     all_outputs = []
     with open(args.input) as f:
-        for line_num, line in enumerate(
-            tqdm(f, desc="Generating"), 1
-        ):  # FIX: read with tqdm directly
+        for line_num, line in enumerate(tqdm(f, desc="Generating"), 1):
             try:
                 base = json.loads(line)
 
@@ -252,7 +264,7 @@ def run_generate(args):
                         num_sequences=1,
                         max_seq_len=args.max_seq_len,
                         temperature=args.temperature,
-                        prefix=prefix_tensor,
+                        prefixes=prefix_tensor.unsqueeze(0),
                         device=device,
                         stop_token=args.stop_token,
                     )[0]

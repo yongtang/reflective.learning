@@ -6,7 +6,7 @@ Modes:
 --mode seed       : Generate labeled samples (text + image + facing + tokens + success state)
 --mode stub       : Generate input-only samples (text + image + facing) for Reflective model
 --mode predict    : Use model (default or Reflective) to predict action sequences
-                    (optionally specify --state-weights like "success=0.99,fail=0.01" and --checkpoint)
+                    (optionally specify --state-weights like "success=0.99,fail=0.01" and --checkpoint and --batch-size)
 --mode verify     : Validate predicted tokens via environment replay (uses start_pos and facing)
 --mode baseline   : Train PPO using stable-baselines3, then evaluate performance
 
@@ -14,7 +14,7 @@ Examples:
 ---------
 python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50 --image image
 python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50 --image image
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01" --checkpoint path/to/model.pt
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01" --checkpoint path/to/model.pt --batch-size 32
 python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json --image image
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
@@ -158,6 +158,7 @@ def predict_tokens(
     model_type="minigrid",
     state_weights_str="success=0.99,fail=0.01",
     checkpoint_path=None,
+    batch_size=32,
 ):
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -190,32 +191,55 @@ def predict_tokens(
             state_weights[state_id] = value
 
         predictions = []
-        for sample in tqdm(samples, desc="Predicting Tokens"):
-            prefix_field = sample.get("prefix")
-            if not prefix_field or not prefix_field.startswith("b64://"):
-                raise ValueError(
-                    "Missing or invalid 'prefix' field for reflective model."
-                )
 
-            prefix_bytes = base64.b64decode(prefix_field.removeprefix("b64://"))
-            prefix_tensor = torch.from_numpy(
-                np.frombuffer(prefix_bytes, dtype=np.float32)
-            ).to(device)
-            prefix_tensor = prefix_tensor.view(-1, model.d_model)
+        for i in tqdm(range(0, len(samples), batch_size), desc="Predicting Tokens"):
+            batch_samples = samples[i : i + batch_size]
 
-            tokens = sample_multiple_sequences_batched(
+            prefix_tensors = []
+            prefix_lens = []
+            for sample in batch_samples:
+                prefix_field = sample.get("prefix")
+                if not prefix_field or not prefix_field.startswith("b64://"):
+                    raise ValueError(
+                        "Missing or invalid 'prefix' field for reflective model."
+                    )
+
+                prefix_bytes = base64.b64decode(prefix_field.removeprefix("b64://"))
+                prefix_tensor = torch.from_numpy(
+                    np.frombuffer(prefix_bytes, dtype=np.float32)
+                ).to(device)
+                prefix_tensor = prefix_tensor.view(-1, model.d_model)
+
+                prefix_tensors.append(prefix_tensor)
+                prefix_lens.append(prefix_tensor.size(0))
+
+            max_prefix_len = max(prefix_lens)
+            batch_prefixes = torch.zeros(
+                len(prefix_tensors),
+                max_prefix_len,
+                model.d_model,
+                device=device,
+                dtype=torch.float32,
+            )
+
+            for j, tensor in enumerate(prefix_tensors):
+                batch_prefixes[j, : tensor.size(0)] = tensor
+
+            tokens_batch = sample_multiple_sequences_batched(
                 model=model,
                 state_weights=state_weights,
-                num_sequences=1,
+                num_sequences=len(batch_samples),
                 max_seq_len=128,
                 temperature=1.0,
-                prefix=prefix_tensor,
+                prefixes=batch_prefixes,
                 device=device,
                 stop_token=None,
-            )[0]
+            )
 
-            decoded = [id_to_token[tok] for tok in tokens]
-            predictions.append(decoded)
+            for tokens in tokens_batch:
+                decoded = [id_to_token[tok] for tok in tokens]
+                predictions.append(decoded)
+
     else:
         predictions = [["forward"] * 5 for _ in samples]
 
@@ -336,6 +360,12 @@ def main():
     parser.add_argument(
         "--checkpoint", type=str, help="Checkpoint path for reflective model"
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Batch size for prediction (only for --mode predict)",
+    )
 
     args = parser.parse_args()
 
@@ -361,6 +391,7 @@ def main():
             model_type=args.model,
             state_weights_str=args.state_weights,
             checkpoint_path=args.checkpoint,
+            batch_size=args.batch_size,
         )
 
     elif args.mode == "verify":

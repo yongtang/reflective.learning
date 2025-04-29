@@ -122,8 +122,8 @@ def test_sample_multiple_sequences_batched(tmp_path):
     model.load_state_dict(torch.load(ckpt_path))
     model.eval()
 
-    # ---- Generate dummy prefix ----
-    dummy_prefix = torch.randn(prefix_len, d_model)
+    # ---- Generate dummy prefixes ----
+    dummy_prefixes = torch.randn(num_sequences, prefix_len, d_model)
 
     # ---- Run batched inference ----
     state_weights = {0: 0.6, 1: 0.4}
@@ -133,7 +133,7 @@ def test_sample_multiple_sequences_batched(tmp_path):
         num_sequences=num_sequences,
         max_seq_len=max_seq_len,
         temperature=1.0,
-        prefix=dummy_prefix,
+        prefixes=dummy_prefixes,
         device="cpu",
         stop_token=0,  # explicit stop_token
     )
@@ -180,7 +180,7 @@ def test_sample_multiple_sequences_batched_no_stop_token(tmp_path):
     model.load_state_dict(torch.load(ckpt_path))
     model.eval()
 
-    dummy_prefix = torch.randn(prefix_len, d_model)
+    dummy_prefixes = torch.randn(num_sequences, prefix_len, d_model)
 
     state_weights = {0: 0.6, 1: 0.4}
     sequences = sample_multiple_sequences_batched(
@@ -189,7 +189,7 @@ def test_sample_multiple_sequences_batched_no_stop_token(tmp_path):
         num_sequences=num_sequences,
         max_seq_len=max_seq_len,
         temperature=1.0,
-        prefix=dummy_prefix,
+        prefixes=dummy_prefixes,
         device="cpu",
         stop_token=None,  # no stop token
     )
