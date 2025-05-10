@@ -6,7 +6,7 @@ Modes:
 --mode seed       : Generate labeled samples (text + image + facing + tokens + success state)
 --mode stub       : Generate input-only samples (text + image + facing) for Reflective model
 --mode predict    : Use model (default or Reflective) to predict action sequences
-                    (optionally specify --state-weights like "0=0.5,1=0.3,2=0.2" and --checkpoint and --batch-size)
+                    (optionally specify --state-weights like "0=0.99,1=0.01" and --checkpoint and --batch-size)
 --mode verify     : Validate predicted tokens via environment replay (uses start_pos and facing)
 --mode baseline   : Train PPO using stable-baselines3, then evaluate performance
 
@@ -14,7 +14,7 @@ Examples:
 ---------
 python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50 --image image --max-success-steps 3
 python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50 --image image --max-success-steps 3
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "0=0.5,1=0.3,2=0.2,3=0.1" --checkpoint path/to/model.pt --batch-size 32 --max-success-steps 3
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "0=0.9,1=0.1,2=0.0,3=0.0" --checkpoint path/to/model.pt --batch-size 32 --max-success-steps 3
 python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json --image image --max-success-steps 3
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
@@ -94,11 +94,7 @@ def generate_samples(
     max_success_steps=None,
 ):
     samples = []
-    progress_desc = (
-        f"Generating Samples ({image_dir})" if image_dir else "Generating Samples"
-    )
-
-    for i in tqdm(range(num_samples), desc=progress_desc):
+    for i in tqdm(range(num_samples), desc="Generating Samples"):
         env = gymnasium.make(env_name, render_mode="rgb_array")
         env.reset()
 
@@ -129,9 +125,9 @@ def generate_samples(
             actions = orientation_aware_planner(start, goal, agent_dir)
             sample["token"] = actions
             sample["state"] = (
-                len(actions)
+                str(len(actions))
                 if len(actions) <= max_success_steps
-                else max_success_steps + 1
+                else str(max_success_steps + 1)
             )
 
         samples.append(sample)
@@ -163,7 +159,7 @@ def predict_tokens(
 
         model = ReflectiveCore(
             vocab_size=len(vocab_map),
-            state_size=max_success_steps + 2,  # success states + 1 failure state
+            state_size=max_success_steps + 2,
             max_seq_len=128,
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -256,9 +252,9 @@ def validate_output(
                 break
 
         if reward > 0 and step_count <= max_success_steps:
-            return step_count
+            return str(step_count)
         else:
-            return max_success_steps + 1
+            return str(max_success_steps + 1)
 
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -314,7 +310,7 @@ def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=N
             fail += 1
 
     print(
-        f"\n📊 PPO Evaluation: Success={success}/{eval_episodes}, Fail={fail}/{eval_episodes}"
+        f"PPO Evaluation: Success={success}/{eval_episodes}, Fail={fail}/{eval_episodes}"
     )
 
 
@@ -322,7 +318,6 @@ def main():
     parser = argparse.ArgumentParser(
         description="MiniGrid Model Pipeline CLI (Reflective + RL)"
     )
-
     parser.add_argument(
         "--mode",
         required=True,
@@ -340,7 +335,7 @@ def main():
         "--model", default="minigrid", choices=["minigrid", "reflective"]
     )
     parser.add_argument("--state-weights", type=str, default="0=1.0")
-    parser.add_argument("--checkpoint", type=str)
+    parser.add_argument("--checkpoint")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument(
         "--max-success-steps",
