@@ -6,7 +6,7 @@ Modes:
 --mode seed       : Generate labeled samples (text + image + facing + tokens + success state)
 --mode stub       : Generate input-only samples (text + image + facing) for Reflective model
 --mode predict    : Use model (default or Reflective) to predict action sequences
-                    (optionally specify --state-weights like "success=0.99,fail=0.01" and --checkpoint and --batch-size)
+                    (optionally specify --state-weights like "0=0.5,1=0.3,2=0.2" and --checkpoint and --batch-size)
 --mode verify     : Validate predicted tokens via environment replay (uses start_pos and facing)
 --mode baseline   : Train PPO using stable-baselines3, then evaluate performance
 
@@ -14,8 +14,8 @@ Examples:
 ---------
 python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50 --image image
 python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50 --image image
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "success=0.99,fail=0.01" --checkpoint path/to/model.pt --batch-size 32
-python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json --image image
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "0=0.5,1=0.3,2=0.2" --checkpoint path/to/model.pt --batch-size 32 --max-success-steps 2
+python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json --image image --max-success-steps 2
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
 
@@ -41,9 +41,6 @@ DIR_TO_STR = {0: "right", 1: "down", 2: "left", 3: "up"}
 STR_TO_DIR = {v: k for k, v in DIR_TO_STR.items()}
 
 
-# ----------------------------------------
-# Orientation-aware planner using agent_dir
-# ----------------------------------------
 def orientation_aware_planner(start, goal, start_dir=0):
     path = []
     x, y = start
@@ -75,16 +72,10 @@ def orientation_aware_planner(start, goal, start_dir=0):
     return path
 
 
-# ----------------------------------------
-# Get random valid (non-wall) grid position
-# ----------------------------------------
 def get_random_pos(env):
     return (random.randint(1, env.width - 2), random.randint(1, env.height - 2))
 
 
-# ----------------------------------------
-# Render and save current environment as image
-# ----------------------------------------
 def render_env_image(env, output_dir, map_id):
     os.makedirs(output_dir, exist_ok=True)
     img = env.render()
@@ -95,11 +86,13 @@ def render_env_image(env, output_dir, map_id):
     return filename
 
 
-# ----------------------------------------
-# Generate samples for seed or stub
-# ----------------------------------------
 def generate_samples(
-    env_name, output_json, image_dir, num_samples, include_labels=True
+    env_name,
+    output_json,
+    image_dir,
+    num_samples,
+    include_labels=True,
+    max_success_steps=15,
 ):
     samples = []
     progress_desc = (
@@ -136,7 +129,12 @@ def generate_samples(
         if include_labels:
             actions = orientation_aware_planner(start, goal, agent_dir)
             sample["token"] = actions
-            sample["state"] = "success"
+            # Assign state: success in k steps if k <= max_success_steps, else failure (state = max_success_steps + 1)
+            sample["state"] = (
+                len(actions)
+                if len(actions) <= max_success_steps
+                else max_success_steps + 1
+            )
 
         samples.append(sample)
 
@@ -149,16 +147,14 @@ def generate_samples(
     )
 
 
-# ----------------------------------------
-# Predict token sequence using a model
-# ----------------------------------------
 def predict_tokens(
     input_json,
     output_json,
     model_type="minigrid",
-    state_weights_str="success=0.99,fail=0.01",
+    state_weights_str="0=1.0",
     checkpoint_path=None,
     batch_size=32,
+    max_success_steps=15,
 ):
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -169,7 +165,8 @@ def predict_tokens(
 
         model = ReflectiveCore(
             vocab_size=len(vocab_map),
-            state_size=2,
+            state_size=max_success_steps
+            + 2,  # +1 for 0-based indexing, +1 for failure state
             max_seq_len=128,
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -185,10 +182,7 @@ def predict_tokens(
         state_weights = {}
         for pair in state_weights_str.split(","):
             key, value = pair.split("=")
-            key = key.strip().lower()
-            value = float(value.strip())
-            state_id = 0 if key == "success" else 1
-            state_weights[state_id] = value
+            state_weights[int(key.strip())] = float(value.strip())
 
         predictions = []
 
@@ -253,22 +247,25 @@ def predict_tokens(
     print(f"✅ Wrote predictions using model '{model_type}' to {output_json}")
 
 
-# ----------------------------------------
-# Validate action sequence by replaying in MiniGrid
-# ----------------------------------------
-def validate_output(input_json, output_json, env_name, image_dir):
+def validate_output(input_json, output_json, env_name, image_dir, max_success_steps=15):
     def replay(env, token_seq, start_pos, facing_str):
         env.reset()
         env.unwrapped.agent_pos = list(start_pos)
         env.unwrapped.agent_dir = STR_TO_DIR[facing_str]
 
+        step_count = 0
         for token in token_seq:
             assert token in ACTION_MAP, f"Invalid token: {token}"
             action = ACTION_MAP[token]
             _, reward, terminated, truncated, _ = env.step(action)
+            step_count += 1
             if terminated or truncated:
-                return "success" if reward > 0 else "fail"
-        return "fail"
+                break
+
+        if reward > 0 and step_count <= max_success_steps:
+            return step_count
+        else:
+            return max_success_steps + 1  # failure
 
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -293,9 +290,6 @@ def validate_output(input_json, output_json, env_name, image_dir):
     print(f"✅ Verified {len(validated)} samples and saved to {output_json}")
 
 
-# ----------------------------------------
-# Train PPO with SB3 and evaluate it
-# ----------------------------------------
 def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=None):
     from stable_baselines3 import PPO
     from stable_baselines3.common.env_util import make_vec_env
@@ -331,9 +325,6 @@ def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=N
     )
 
 
-# ----------------------------------------
-# CLI Entry Point
-# ----------------------------------------
 def main():
     parser = argparse.ArgumentParser(
         description="MiniGrid Model Pipeline CLI (Reflective + RL)"
@@ -356,15 +347,16 @@ def main():
     parser.add_argument(
         "--model", default="minigrid", choices=["minigrid", "reflective"]
     )
-    parser.add_argument("--state-weights", type=str, default="success=0.99,fail=0.01")
+    parser.add_argument("--state-weights", type=str, default="0=1.0")
     parser.add_argument(
         "--checkpoint", type=str, help="Checkpoint path for reflective model"
     )
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument(
-        "--batch-size",
+        "--max-success-steps",
         type=int,
-        default=32,
-        help="Batch size for prediction (only for --mode predict)",
+        default=15,
+        help="Maximum number of steps to count as success. Longer = failure (state = n+1)",
     )
 
     args = parser.parse_args()
@@ -372,13 +364,23 @@ def main():
     if args.mode == "seed":
         assert args.output, "--output is required for --mode seed"
         generate_samples(
-            args.env, args.output, args.image, args.samples, include_labels=True
+            args.env,
+            args.output,
+            args.image,
+            args.samples,
+            include_labels=True,
+            max_success_steps=args.max_success_steps,
         )
 
     elif args.mode == "stub":
         assert args.output, "--output is required for --mode stub"
         generate_samples(
-            args.env, args.output, args.image, args.samples, include_labels=False
+            args.env,
+            args.output,
+            args.image,
+            args.samples,
+            include_labels=False,
+            max_success_steps=args.max_success_steps,
         )
 
     elif args.mode == "predict":
@@ -392,13 +394,20 @@ def main():
             state_weights_str=args.state_weights,
             checkpoint_path=args.checkpoint,
             batch_size=args.batch_size,
+            max_success_steps=args.max_success_steps,
         )
 
     elif args.mode == "verify":
         assert (
             args.input and args.output
         ), "--input and --output are required for --mode verify"
-        validate_output(args.input, args.output, args.env, args.image)
+        validate_output(
+            args.input,
+            args.output,
+            args.env,
+            args.image,
+            max_success_steps=args.max_success_steps,
+        )
 
     elif args.mode == "baseline":
         train_and_evaluate_ppo(
