@@ -12,10 +12,10 @@ Modes:
 
 Examples:
 ---------
-python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50 --image image
-python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50 --image image
-python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "0=0.5,1=0.3,2=0.2" --checkpoint path/to/model.pt --batch-size 32 --max-success-steps 2
-python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json --image image --max-success-steps 2
+python -m src.reflective_learning.tools.mini --mode seed --output seed.json --samples 50 --image image --max-success-steps 3
+python -m src.reflective_learning.tools.mini --mode stub --output stub.json --samples 50 --image image --max-success-steps 3
+python -m src.reflective_learning.tools.mini --mode predict --input stub.json --output predicted.json --model reflective --state-weights "0=0.5,1=0.3,2=0.2,3=0.1" --checkpoint path/to/model.pt --batch-size 32 --max-success-steps 3
+python -m src.reflective_learning.tools.mini --mode verify --input predicted.json --output verified.json --image image --max-success-steps 3
 python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 --episodes 20 --save_model ppo_model.zip
 """
 
@@ -35,7 +35,6 @@ from tqdm import tqdm
 from reflective_learning.inference import sample_multiple_sequences_batched
 from reflective_learning.model import ReflectiveCore
 
-# Action encoding for MiniGrid
 ACTION_MAP = {"left": 0, "right": 1, "forward": 2}
 DIR_TO_STR = {0: "right", 1: "down", 2: "left", 3: "up"}
 STR_TO_DIR = {v: k for k, v in DIR_TO_STR.items()}
@@ -92,7 +91,7 @@ def generate_samples(
     image_dir,
     num_samples,
     include_labels=True,
-    max_success_steps=15,
+    max_success_steps=None,
 ):
     samples = []
     progress_desc = (
@@ -129,7 +128,6 @@ def generate_samples(
         if include_labels:
             actions = orientation_aware_planner(start, goal, agent_dir)
             sample["token"] = actions
-            # Assign state: success in k steps if k <= max_success_steps, else failure (state = max_success_steps + 1)
             sample["state"] = (
                 len(actions)
                 if len(actions) <= max_success_steps
@@ -154,7 +152,7 @@ def predict_tokens(
     state_weights_str="0=1.0",
     checkpoint_path=None,
     batch_size=32,
-    max_success_steps=15,
+    max_success_steps=None,
 ):
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -165,8 +163,7 @@ def predict_tokens(
 
         model = ReflectiveCore(
             vocab_size=len(vocab_map),
-            state_size=max_success_steps
-            + 2,  # +1 for 0-based indexing, +1 for failure state
+            state_size=max_success_steps + 2,  # success states + 1 failure state
             max_seq_len=128,
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -185,7 +182,6 @@ def predict_tokens(
             state_weights[int(key.strip())] = float(value.strip())
 
         predictions = []
-
         for i in tqdm(range(0, len(samples), batch_size), desc="Predicting Tokens"):
             batch_samples = samples[i : i + batch_size]
 
@@ -209,11 +205,7 @@ def predict_tokens(
 
             max_prefix_len = max(prefix_lens)
             batch_prefixes = torch.zeros(
-                len(prefix_tensors),
-                max_prefix_len,
-                model.d_model,
-                device=device,
-                dtype=torch.float32,
+                len(prefix_tensors), max_prefix_len, model.d_model, device=device
             )
 
             for j, tensor in enumerate(prefix_tensors):
@@ -233,7 +225,6 @@ def predict_tokens(
             for tokens in tokens_batch:
                 decoded = [id_to_token[tok] for tok in tokens]
                 predictions.append(decoded)
-
     else:
         predictions = [["forward"] * 5 for _ in samples]
 
@@ -247,7 +238,9 @@ def predict_tokens(
     print(f"✅ Wrote predictions using model '{model_type}' to {output_json}")
 
 
-def validate_output(input_json, output_json, env_name, image_dir, max_success_steps=15):
+def validate_output(
+    input_json, output_json, env_name, image_dir, max_success_steps=None
+):
     def replay(env, token_seq, start_pos, facing_str):
         env.reset()
         env.unwrapped.agent_pos = list(start_pos)
@@ -265,7 +258,7 @@ def validate_output(input_json, output_json, env_name, image_dir, max_success_st
         if reward > 0 and step_count <= max_success_steps:
             return step_count
         else:
-            return max_success_steps + 1  # failure
+            return max_success_steps + 1
 
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -334,11 +327,10 @@ def main():
         "--mode",
         required=True,
         choices=["seed", "stub", "predict", "verify", "baseline"],
-        help="Which pipeline stage to run",
     )
     parser.add_argument("--env", default="MiniGrid-Empty-8x8-v0")
-    parser.add_argument("--input", help="Input JSON file")
-    parser.add_argument("--output", help="Output JSON file")
+    parser.add_argument("--input")
+    parser.add_argument("--output")
     parser.add_argument("--image", default="image")
     parser.add_argument("--samples", type=int, default=10)
     parser.add_argument("--episodes", type=int, default=20)
@@ -348,15 +340,13 @@ def main():
         "--model", default="minigrid", choices=["minigrid", "reflective"]
     )
     parser.add_argument("--state-weights", type=str, default="0=1.0")
-    parser.add_argument(
-        "--checkpoint", type=str, help="Checkpoint path for reflective model"
-    )
+    parser.add_argument("--checkpoint", type=str)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument(
         "--max-success-steps",
         type=int,
-        default=15,
-        help="Maximum number of steps to count as success. Longer = failure (state = n+1)",
+        required=True,
+        help="Max number of steps to count as success. > this = failure (state = n + 1)",
     )
 
     args = parser.parse_args()
