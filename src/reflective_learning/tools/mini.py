@@ -98,17 +98,24 @@ def generate_samples(
         env = gymnasium.make(env_name, render_mode="rgb_array")
         env.reset()
 
+        # Select distinct start and goal positions
         start = get_random_pos(env.unwrapped)
         goal = get_random_pos(env.unwrapped)
         while goal == start:
             goal = get_random_pos(env.unwrapped)
 
+        # Set agent position and facing direction
         env.unwrapped.agent_pos = list(start)
         agent_dir = random.randint(0, 3)
         env.unwrapped.agent_dir = agent_dir
 
+        # Insert goal object at specified goal position
+        env.unwrapped.grid.set(goal[0], goal[1], minigrid.core.world_object.Goal())
+
+        # Render and save the environment image
         image_filename = render_env_image(env, image_dir, i)
 
+        # Construct sample
         sample = {
             "text": [
                 f"start {start[0]},{start[1]}",
@@ -121,6 +128,7 @@ def generate_samples(
             "facing": DIR_TO_STR[agent_dir],
         }
 
+        # If labeled, compute planner path and success state
         if include_labels:
             actions = orientation_aware_planner(start, goal, agent_dir)
             sample["token"] = actions
@@ -131,6 +139,7 @@ def generate_samples(
             )
 
         samples.append(sample)
+        env.close()
 
     with open(output_json, "w") as f:
         for item in samples:
