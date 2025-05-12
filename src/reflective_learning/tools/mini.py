@@ -23,7 +23,6 @@ import argparse
 import base64
 import json
 import os
-import random
 
 import gymnasium
 import minigrid  # pylint: disable=unused-import
@@ -71,10 +70,6 @@ def orientation_aware_planner(start, goal, start_dir=0):
     return path
 
 
-def get_random_pos(env):
-    return (random.randint(1, env.width - 2), random.randint(1, env.height - 2))
-
-
 def render_env_image(env, output_dir, map_id):
     os.makedirs(output_dir, exist_ok=True)
     img = env.render()
@@ -83,6 +78,15 @@ def render_env_image(env, output_dir, map_id):
     path = os.path.join(output_dir, filename)
     image.save(path)
     return filename
+
+
+def find_goal_pos(grid):
+    for x in range(grid.width):
+        for y in range(grid.height):
+            obj = grid.get(x, y)
+            if obj and obj.type == "goal":
+                return [x, y]
+    raise ValueError("Goal not found in grid")
 
 
 def generate_samples(
@@ -98,24 +102,13 @@ def generate_samples(
         env = gymnasium.make(env_name, render_mode="rgb_array")
         env.reset()
 
-        # Select distinct start and goal positions
-        start = get_random_pos(env.unwrapped)
-        goal = get_random_pos(env.unwrapped)
-        while goal == start:
-            goal = get_random_pos(env.unwrapped)
+        # Extract agent and goal info *after* env.reset()
+        start = list(env.unwrapped.agent_pos)
+        agent_dir = env.unwrapped.agent_dir
+        goal = find_goal_pos(env.unwrapped.grid)
 
-        # Set agent position and facing direction
-        env.unwrapped.agent_pos = list(start)
-        agent_dir = random.randint(0, 3)
-        env.unwrapped.agent_dir = agent_dir
-
-        # Insert goal object at specified goal position
-        env.unwrapped.grid.set(goal[0], goal[1], minigrid.core.world_object.Goal())
-
-        # Render and save the environment image
         image_filename = render_env_image(env, image_dir, i)
 
-        # Construct sample
         sample = {
             "text": [
                 f"start {start[0]},{start[1]}",
@@ -123,12 +116,11 @@ def generate_samples(
                 f"facing {DIR_TO_STR[agent_dir]}",
             ],
             "image": [image_filename],
-            "start_pos": list(start),
-            "goal_pos": list(goal),
+            "start_pos": start,
+            "goal_pos": goal,
             "facing": DIR_TO_STR[agent_dir],
         }
 
-        # If labeled, compute planner path and success state
         if include_labels:
             actions = orientation_aware_planner(start, goal, agent_dir)
             sample["token"] = actions
