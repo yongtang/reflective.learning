@@ -116,8 +116,8 @@ def generate_samples(
                 f"facing {DIR_TO_STR[agent_dir]}",
             ],
             "image": [image_filename],
-            "start_pos": start,
-            "goal_pos": goal,
+            "start_pos": [int(x) for x in start],
+            "goal_pos": [int(x) for x in goal],
             "facing": DIR_TO_STR[agent_dir],
         }
 
