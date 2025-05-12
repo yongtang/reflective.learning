@@ -324,7 +324,7 @@ def main():
         required=True,
         choices=["seed", "stub", "predict", "verify", "baseline"],
     )
-    parser.add_argument("--env", default="MiniGrid-Empty-8x8-v0")
+    parser.add_argument("--env", default="MiniGrid-Empty-Random-8x8-v0")
     parser.add_argument("--input")
     parser.add_argument("--output")
     parser.add_argument("--image", default="image")
