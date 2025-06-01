@@ -21,7 +21,6 @@ python -m src.reflective_learning.tools.mini --mode baseline --timesteps 100000 
 
 import argparse
 import base64
-import functools
 import json
 import os
 
@@ -90,24 +89,17 @@ def find_goal_pos(grid):
     raise ValueError("Goal not found in grid")
 
 
-@functools.lru_cache(maxsize=None)
-def render_and_save_image(
-    env_name, image_dir, start_x, start_y, goal_x, goal_y, agent_dir
-):
+def render_and_save_image_if_needed(env, image_dir, start, goal, agent_dir):
     dir_str = DIR_TO_STR[agent_dir]
-    filename = f"start_{start_x}_{start_y}_goal_{goal_x}_{goal_y}_facing_{dir_str}.png"
+    filename = (
+        f"start_{start[0]}_{start[1]}_goal_{goal[0]}_{goal[1]}_facing_{dir_str}.png"
+    )
     path = os.path.join(image_dir, filename)
 
     if not os.path.exists(path):
-        env = gymnasium.make(env_name, render_mode="rgb_array")
-        env.reset()
-        env.unwrapped.agent_pos = [start_x, start_y]
-        env.unwrapped.agent_dir = agent_dir
-        env.unwrapped.place_obj(env.unwrapped.goal, [goal_x, goal_y])
         img = env.render()
         image = PIL.Image.fromarray(img)
         image.save(path)
-        env.close()
 
     return filename
 
@@ -121,6 +113,7 @@ def generate_samples(
     max_success_steps=None,
 ):
     samples = []
+    seen_keys = set()
     attempts = 0
     max_attempts = num_samples * 20  # avoid infinite loop if space is exhausted
 
@@ -136,14 +129,15 @@ def generate_samples(
             agent_dir = env.unwrapped.agent_dir
             goal = find_goal_pos(env.unwrapped.grid)
 
-            image_filename = render_and_save_image(
-                env_name, image_dir, start[0], start[1], goal[0], goal[1], agent_dir
-            )
-
-            # Skip if duplicate sample
-            if any(s["image"][0] == image_filename for s in samples):
+            key = (tuple(start), tuple(goal), agent_dir)
+            if key in seen_keys:
                 env.close()
                 continue
+            seen_keys.add(key)
+
+            image_filename = render_and_save_image_if_needed(
+                env, image_dir, start, goal, agent_dir
+            )
 
             sample = {
                 "text": [
