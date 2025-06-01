@@ -203,6 +203,15 @@ def predict_tokens(
             key, value = pair.split("=")
             state_weights[int(key.strip())] = float(value.strip())
 
+        # ✅ LRU cache for prefix decoding
+        @functools.lru_cache(maxsize=4096)
+        def decode_prefix(prefix_field: str) -> torch.Tensor:
+            assert prefix_field.startswith("b64://"), "Invalid prefix format"
+            prefix_bytes = base64.b64decode(prefix_field.removeprefix("b64://"))
+            return torch.from_numpy(np.frombuffer(prefix_bytes, dtype=np.float32)).view(
+                -1, model.d_model
+            )
+
         predictions = []
         for i in tqdm(range(0, len(samples), batch_size), desc="Predicting Tokens"):
             batch_samples = samples[i : i + batch_size]
@@ -210,18 +219,7 @@ def predict_tokens(
             prefix_tensors = []
             prefix_lens = []
             for sample in batch_samples:
-                prefix_field = sample.get("prefix")
-                if not prefix_field or not prefix_field.startswith("b64://"):
-                    raise ValueError(
-                        "Missing or invalid 'prefix' field for reflective model."
-                    )
-
-                prefix_bytes = base64.b64decode(prefix_field.removeprefix("b64://"))
-                prefix_tensor = torch.from_numpy(
-                    np.frombuffer(prefix_bytes, dtype=np.float32)
-                ).to(device)
-                prefix_tensor = prefix_tensor.view(-1, model.d_model)
-
+                prefix_tensor = decode_prefix(sample["prefix"]).to(device)
                 prefix_tensors.append(prefix_tensor)
                 prefix_lens.append(prefix_tensor.size(0))
 
