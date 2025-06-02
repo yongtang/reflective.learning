@@ -175,6 +175,7 @@ def predict_tokens(
     checkpoint_path=None,
     batch_size=32,
     max_success_steps=None,
+    max_seq_len=128,
 ):
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
@@ -186,7 +187,7 @@ def predict_tokens(
         model = ReflectiveCore(
             vocab_size=len(vocab_map),
             state_size=max_success_steps + 2,
-            max_seq_len=128,
+            max_seq_len=max_seq_len,
         )
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -203,7 +204,6 @@ def predict_tokens(
             key, value = pair.split("=")
             state_weights[int(key.strip())] = float(value.strip())
 
-        # ✅ LRU cache for prefix decoding
         @functools.lru_cache(maxsize=4096)
         def decode_prefix(prefix_field: str) -> torch.Tensor:
             assert prefix_field.startswith("b64://"), "Invalid prefix format"
@@ -235,7 +235,7 @@ def predict_tokens(
                 model=model,
                 state_weights=state_weights,
                 num_sequences=len(batch_samples),
-                max_seq_len=128,
+                max_seq_len=max_seq_len,
                 temperature=1.0,
                 prefixes=batch_prefixes,
                 device=device,
@@ -361,6 +361,7 @@ def main():
     parser.add_argument("--state-weights", type=str, default="0=1.0")
     parser.add_argument("--checkpoint")
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--max-seq-len", type=int, default=128)
     parser.add_argument(
         "--max-success-steps",
         type=int,
@@ -404,6 +405,7 @@ def main():
             checkpoint_path=args.checkpoint,
             batch_size=args.batch_size,
             max_success_steps=args.max_success_steps,
+            max_seq_len=args.max_seq_len,
         )
 
     elif args.mode == "verify":
