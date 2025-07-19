@@ -24,6 +24,7 @@ import base64
 import functools
 import json
 import os
+import random
 
 import gymnasium
 import minigrid  # pylint: disable=unused-import
@@ -171,7 +172,7 @@ def generate_samples(
                 shortest = orientation_aware_planner(start, goal, agent_dir)
                 max_extra_steps = max(0, max_success_steps - len(shortest))
                 variants = inject_detours(shortest, max_extra_steps)
-                actions = np.random.choice(variants)
+                actions = random.choice(variants)
                 sample["token"] = actions
                 sample["state"] = (
                     str(len(actions))
