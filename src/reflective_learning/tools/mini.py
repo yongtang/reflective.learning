@@ -116,6 +116,28 @@ def generate_samples(
     include_labels=True,
     max_success_steps=None,
 ):
+    def inject_detours(actions, max_extra_steps):
+        """
+        Generate variants of the shortest path by injecting small detours (e.g., right→forward→left).
+        Each detour adds 2 steps.
+        """
+        variants = [actions]
+        for extra in range(1, max_extra_steps + 1):
+            path = list(actions)
+            count = 0
+            i = 0
+            while i < len(path) and count < extra:
+                if path[i] == "forward":
+                    # Replace one forward with right → forward → left
+                    path = path[:i] + ["right", "forward", "left"] + path[i + 1 :]
+                    i += 3
+                    count += 2
+                else:
+                    i += 1
+            if len(path) == len(actions) + extra:
+                variants.append(path)
+        return variants
+
     samples = []
 
     os.makedirs(image_dir, exist_ok=True)
@@ -146,7 +168,10 @@ def generate_samples(
             }
 
             if include_labels:
-                actions = orientation_aware_planner(start, goal, agent_dir)
+                shortest = orientation_aware_planner(start, goal, agent_dir)
+                max_extra_steps = max(0, max_success_steps - len(shortest))
+                variants = inject_detours(shortest, max_extra_steps)
+                actions = np.random.choice(variants)
                 sample["token"] = actions
                 sample["state"] = (
                     str(len(actions))
