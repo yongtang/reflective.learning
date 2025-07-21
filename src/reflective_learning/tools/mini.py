@@ -238,14 +238,18 @@ def predict_tokens(
                 -1, model.d_model
             )
 
+        prefix_cache = [
+            decode_prefix(sample["prefix"]).to(device) for sample in samples
+        ]
+
         predictions = []
         for i in tqdm(range(0, len(samples), batch_size), desc="Predicting Tokens"):
             batch_samples = samples[i : i + batch_size]
 
             prefix_tensors = []
             prefix_lens = []
-            for sample in batch_samples:
-                prefix_tensor = decode_prefix(sample["prefix"]).to(device)
+            for j, sample in enumerate(batch_samples):
+                prefix_tensor = prefix_cache[i + j]
                 prefix_tensors.append(prefix_tensor)
                 prefix_lens.append(prefix_tensor.size(0))
 
