@@ -91,24 +91,6 @@ def find_goal_pos(grid):
     raise ValueError("Goal not found in grid")
 
 
-@functools.lru_cache(maxsize=None)
-def render_and_save_image(
-    env_name, image_dir, start_x, start_y, goal_x, goal_y, agent_dir
-):
-    dir_str = DIR_TO_STR[agent_dir]
-    filename = f"start_{start_x}_{start_y}_goal_{goal_x}_{goal_y}_facing_{dir_str}.png"
-    path = os.path.join(image_dir, filename)
-
-    env = gymnasium.make(env_name, render_mode="rgb_array")
-    env.reset()
-    img = env.render()
-    image = PIL.Image.fromarray(img)
-    image.save(path)
-    env.close()
-
-    return filename
-
-
 def generate_samples(
     env_name,
     output_json,
@@ -140,6 +122,7 @@ def generate_samples(
         return variants
 
     samples = []
+    filenames = set()
 
     os.makedirs(image_dir, exist_ok=True)
 
@@ -152,9 +135,14 @@ def generate_samples(
             agent_dir = env.unwrapped.agent_dir
             goal = find_goal_pos(env.unwrapped.grid)
 
-            image_filename = render_and_save_image(
-                env_name, image_dir, start[0], start[1], goal[0], goal[1], agent_dir
-            )
+            filename = f"start_{start[0]}_{start[1]}_goal_{goal[0]}_{goal[1]}_facing_{DIR_TO_STR[agent_dir]}.png"
+            if filename not in filenames:
+
+                img = env.render()
+                image = PIL.Image.fromarray(img)
+                image.save(os.path.join(image_dir, filename))
+
+                filenames.add(filename)
 
             sample = {
                 "text": [
@@ -162,7 +150,7 @@ def generate_samples(
                     f"stop {goal[0]},{goal[1]}",
                     f"facing {DIR_TO_STR[agent_dir]}",
                 ],
-                "image": [image_filename],
+                "image": [filename],
                 "start_pos": [int(x) for x in start],
                 "goal_pos": [int(x) for x in goal],
                 "facing": DIR_TO_STR[agent_dir],
@@ -184,9 +172,12 @@ def generate_samples(
             env.close()
             pbar.update(1)
 
+    json_strings = [json.dumps(sample, sort_keys=True) for sample in samples]
+    unique_json_strings = list(set(json_strings))
+
     with open(output_json, "w") as f:
-        for item in samples:
-            f.write(json.dumps(item) + "\n")
+        for line in unique_json_strings:
+            f.write(line + "\n")
 
     print(
         f"✅ Wrote {len(samples)} {'labeled' if include_labels else 'stub'} samples to {output_json}"
