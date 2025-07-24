@@ -375,7 +375,7 @@ def main():
         required=True,
         choices=["seed", "stub", "predict", "verify", "baseline"],
     )
-    parser.add_argument("--env", default=6)
+    parser.add_argument("--env", type=int, default=6)
     parser.add_argument("--input")
     parser.add_argument("--output")
     parser.add_argument("--image", default="image")
