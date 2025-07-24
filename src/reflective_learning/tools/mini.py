@@ -26,8 +26,7 @@ import json
 import os
 import random
 
-import gymnasium
-import minigrid  # pylint: disable=unused-import
+import minigrid
 import numpy as np
 import PIL.Image
 import torch
@@ -92,7 +91,7 @@ def find_goal_pos(grid):
 
 
 def generate_samples(
-    env_name,
+    env_size,
     output_json,
     image_dir,
     num_samples,
@@ -128,7 +127,9 @@ def generate_samples(
 
     with tqdm(total=num_samples, desc="Generating Samples") as pbar:
         for _ in range(num_samples):
-            env = gymnasium.make(env_name, render_mode="rgb_array")
+            env = minigrid.envs.EmptyEnv(
+                size=env_size, agent_start_pos=None, render_mode="rgb_array"
+            )
             env.reset()
 
             start = list(env.unwrapped.agent_pos)
@@ -280,7 +281,7 @@ def predict_tokens(
 
 
 def validate_output(
-    input_json, output_json, env_name, image_dir, max_success_steps=None
+    input_json, output_json, env_size, image_dir, max_success_steps=None
 ):
     def replay(env, token_seq, start_pos, facing_str):
         env.reset()
@@ -311,7 +312,9 @@ def validate_output(
             "start_pos" in sample and "facing" in sample
         ), "Missing start_pos or facing"
 
-        env = gymnasium.make(env_name, render_mode="rgb_array")
+        env = minigrid.envs.EmptyEnv(
+            size=env_size, agent_start_pos=None, render_mode="rgb_array"
+        )
         sample["state"] = replay(
             env, sample["token"], sample["start_pos"], sample["facing"]
         )
@@ -324,12 +327,14 @@ def validate_output(
     print(f"✅ Verified {len(validated)} samples and saved to {output_json}")
 
 
-def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=None):
+def train_and_evaluate_ppo(env_size, total_timesteps, eval_episodes, save_path=None):
     from stable_baselines3 import PPO
     from stable_baselines3.common.env_util import make_vec_env
 
     def make_env():
-        return gymnasium.make(env_name, render_mode="rgb_array")
+        return minigrid.envs.EmptyEnv(
+            size=env_size, agent_start_pos=None, render_mode="rgb_array"
+        )
 
     env = make_vec_env(make_env, n_envs=4)
     model = PPO("CnnPolicy", env, verbose=1)
@@ -339,7 +344,9 @@ def train_and_evaluate_ppo(env_name, total_timesteps, eval_episodes, save_path=N
         model.save(save_path)
         print(f"✅ Saved PPO model to {save_path}")
 
-    eval_env = gymnasium.make(env_name, render_mode="rgb_array")
+    eval_env = minigrid.envs.EmptyEnv(
+        size=env_size, agent_start_pos=None, render_mode="rgb_array"
+    )
     success, fail = 0, 0
 
     for _ in tqdm(range(eval_episodes), desc="Evaluating PPO"):
@@ -368,7 +375,7 @@ def main():
         required=True,
         choices=["seed", "stub", "predict", "verify", "baseline"],
     )
-    parser.add_argument("--env", default="MiniGrid-Empty-Random-6x6-v0")
+    parser.add_argument("--env", default=6)
     parser.add_argument("--input")
     parser.add_argument("--output")
     parser.add_argument("--image", default="image")
