@@ -142,6 +142,11 @@ def train(
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
+    # Track checkpoints
+    checkpoint_dir = os.path.join(os.path.dirname(save_path), "checkpoints")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    recent_checkpoints = []
+
     model.train()
     for epoch in range(epochs):
         total_loss = 0.0
@@ -168,9 +173,17 @@ def train(
                 total_loss += loss.item()
                 pbar.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
-        print(
-            f"📉 Epoch {epoch + 1} complete. Avg loss: {total_loss / num_batches:.4f}"
-        )
+        avg_loss = total_loss / num_batches
+        print(f"📉 Epoch {epoch + 1} complete. Avg loss: {avg_loss:.4f}")
+
+        # Save checkpoint and keep only the last 3
+        checkpoint_path = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}.pt")
+        torch.save(model.state_dict(), checkpoint_path)
+        recent_checkpoints.append(checkpoint_path)
+        if len(recent_checkpoints) > 3:
+            oldest = recent_checkpoints.pop(0)
+            if os.path.exists(oldest):
+                os.remove(oldest)
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     torch.save(model.state_dict(), save_path)
