@@ -179,6 +179,7 @@ def train(
         # Save checkpoint and keep only the last 3
         checkpoint_path = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}.pt")
         torch.save(model.state_dict(), checkpoint_path)
+        print(f"💾 Checkpoint saved to: {checkpoint_path}")
         recent_checkpoints.append(checkpoint_path)
         if len(recent_checkpoints) > 3:
             oldest = recent_checkpoints.pop(0)
