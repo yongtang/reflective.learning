@@ -40,6 +40,21 @@ DIR_TO_STR = {0: "right", 1: "down", 2: "left", 3: "up"}
 STR_TO_DIR = {v: k for k, v in DIR_TO_STR.items()}
 
 
+class EmptyEnv(minigrid.envs.EmptyEnv):
+    def __init__(self, randomize=False, **kwargs):
+        self.randomize = randomize
+        super().__init__(**kwargs)
+
+    def _gen_grid(self, width, height):
+        super()._gen_grid(width, height)
+
+        if self.randomize:
+            # Remove the default goal at bottom-right
+            self.grid.set(width - 2, height - 2, None)
+            # Place goal randomly
+            self.place_obj(Goal())
+
+
 def orientation_aware_planner(start, goal, start_dir=0):
     path = []
     x, y = start
@@ -127,9 +142,7 @@ def generate_samples(
 
     with tqdm(total=num_samples, desc="Generating Samples") as pbar:
         for _ in range(num_samples):
-            env = minigrid.envs.EmptyEnv(
-                size=env_size, agent_start_pos=None, render_mode="rgb_array"
-            )
+            env = EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
             env.reset()
 
             start = list(env.unwrapped.agent_pos)
@@ -312,9 +325,7 @@ def validate_output(
             "start_pos" in sample and "facing" in sample
         ), "Missing start_pos or facing"
 
-        env = minigrid.envs.EmptyEnv(
-            size=env_size, agent_start_pos=None, render_mode="rgb_array"
-        )
+        env = EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
         sample["state"] = replay(
             env, sample["token"], sample["start_pos"], sample["facing"]
         )
@@ -332,9 +343,7 @@ def train_and_evaluate_ppo(env_size, total_timesteps, eval_episodes, save_path=N
     from stable_baselines3.common.env_util import make_vec_env
 
     def make_env():
-        return minigrid.envs.EmptyEnv(
-            size=env_size, agent_start_pos=None, render_mode="rgb_array"
-        )
+        return EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
 
     env = make_vec_env(make_env, n_envs=4)
     model = PPO("CnnPolicy", env, verbose=1)
@@ -344,9 +353,7 @@ def train_and_evaluate_ppo(env_size, total_timesteps, eval_episodes, save_path=N
         model.save(save_path)
         print(f"✅ Saved PPO model to {save_path}")
 
-    eval_env = minigrid.envs.EmptyEnv(
-        size=env_size, agent_start_pos=None, render_mode="rgb_array"
-    )
+    eval_env = EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
     success, fail = 0, 0
 
     for _ in tqdm(range(eval_episodes), desc="Evaluating PPO"):
