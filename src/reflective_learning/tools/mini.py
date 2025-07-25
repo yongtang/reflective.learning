@@ -106,6 +106,7 @@ def find_goal_pos(grid):
 
 
 def generate_samples(
+    randomize,
     env_size,
     output_json,
     image_dir,
@@ -142,7 +143,12 @@ def generate_samples(
 
     with tqdm(total=num_samples, desc="Generating Samples") as pbar:
         for _ in range(num_samples):
-            env = EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
+            env = EmptyEnv(
+                randomize=randomize,
+                size=env_size,
+                agent_start_pos=None,
+                render_mode="rgb_array",
+            )
             env.reset()
 
             start = list(env.unwrapped.agent_pos)
@@ -294,7 +300,7 @@ def predict_tokens(
 
 
 def validate_output(
-    input_json, output_json, env_size, image_dir, max_success_steps=None
+    input_json, output_json, randomize, env_size, image_dir, max_success_steps=None
 ):
     def replay(env, token_seq, start_pos, facing_str):
         env.reset()
@@ -325,7 +331,12 @@ def validate_output(
             "start_pos" in sample and "facing" in sample
         ), "Missing start_pos or facing"
 
-        env = EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
+        env = EmptyEnv(
+            randomize=randomize,
+            size=env_size,
+            agent_start_pos=None,
+            render_mode="rgb_array",
+        )
         sample["state"] = replay(
             env, sample["token"], sample["start_pos"], sample["facing"]
         )
@@ -338,12 +349,19 @@ def validate_output(
     print(f"✅ Verified {len(validated)} samples and saved to {output_json}")
 
 
-def train_and_evaluate_ppo(env_size, total_timesteps, eval_episodes, save_path=None):
+def train_and_evaluate_ppo(
+    randomize, env_size, total_timesteps, eval_episodes, save_path=None
+):
     from stable_baselines3 import PPO
     from stable_baselines3.common.env_util import make_vec_env
 
     def make_env():
-        return EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
+        return EmptyEnv(
+            randomize=randomize,
+            size=env_size,
+            agent_start_pos=None,
+            render_mode="rgb_array",
+        )
 
     env = make_vec_env(make_env, n_envs=4)
     model = PPO("CnnPolicy", env, verbose=1)
@@ -353,7 +371,12 @@ def train_and_evaluate_ppo(env_size, total_timesteps, eval_episodes, save_path=N
         model.save(save_path)
         print(f"✅ Saved PPO model to {save_path}")
 
-    eval_env = EmptyEnv(size=env_size, agent_start_pos=None, render_mode="rgb_array")
+    eval_env = EmptyEnv(
+        randomize=randomize,
+        size=env_size,
+        agent_start_pos=None,
+        render_mode="rgb_array",
+    )
     success, fail = 0, 0
 
     for _ in tqdm(range(eval_episodes), desc="Evaluating PPO"):
@@ -382,6 +405,7 @@ def main():
         required=True,
         choices=["seed", "stub", "predict", "verify", "baseline"],
     )
+    parser.add_argument("--randomize", type=bool, default=False)
     parser.add_argument("--env", type=int, default=6)
     parser.add_argument("--input")
     parser.add_argument("--output")
@@ -409,6 +433,7 @@ def main():
     if args.mode == "seed":
         assert args.output, "--output is required for --mode seed"
         generate_samples(
+            args.randomize,
             args.env,
             args.output,
             args.image,
@@ -420,6 +445,7 @@ def main():
     elif args.mode == "stub":
         assert args.output, "--output is required for --mode stub"
         generate_samples(
+            args.randomize,
             args.env,
             args.output,
             args.image,
@@ -450,6 +476,7 @@ def main():
         validate_output(
             args.input,
             args.output,
+            args.randomize,
             args.env,
             args.image,
             max_success_steps=args.max_success_steps,
@@ -457,7 +484,11 @@ def main():
 
     elif args.mode == "baseline":
         train_and_evaluate_ppo(
-            args.env, args.timesteps, args.episodes, save_path=args.save_model
+            args.randomize,
+            args.env,
+            args.timesteps,
+            args.episodes,
+            save_path=args.save_model,
         )
 
     else:
