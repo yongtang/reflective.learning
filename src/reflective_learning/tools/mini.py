@@ -41,14 +41,20 @@ STR_TO_DIR = {v: k for k, v in DIR_TO_STR.items()}
 
 
 class EmptyEnv(minigrid.envs.EmptyEnv):
-    def __init__(self, randomize=False, **kwargs):
+    def __init__(self, goal=None, randomize=False, **kwargs):
+        self.goal = goal
         self.randomize = randomize
         super().__init__(**kwargs)
 
     def _gen_grid(self, width, height):
         super()._gen_grid(width, height)
 
-        if self.randomize:
+        if self.goal:
+            # Remove the default goal at bottom-right
+            self.grid.set(width - 2, height - 2, None)
+            # Place goal at goal
+            self.grid.set(*self.goal, minigrid.core.world_object.Goal())
+        elif self.randomize:
             # Remove the default goal at bottom-right
             self.grid.set(width - 2, height - 2, None)
             # Place goal randomly
@@ -302,19 +308,27 @@ def predict_tokens(
 def validate_output(
     input_json, output_json, randomize, env_size, image_dir, max_success_steps=None
 ):
-    def replay(env, token_seq, start_pos, facing_str):
+    def replay(sample):
+        env = EmptyEnv(
+            goal=sample["goal_pos"],
+            randomize=False,
+            size=env_size,
+            agent_start_pos=sample["start_pos"],
+            agent_start_dir=STR_TO_DIR[sample["facing"]],
+            render_mode="rgb_array",
+        )
         env.reset()
-        env.unwrapped.agent_pos = list(start_pos)
-        env.unwrapped.agent_dir = STR_TO_DIR[facing_str]
 
         step_count = 0
-        for token in token_seq:
+        for token in sample["token"]:
             assert token in ACTION_MAP, f"Invalid token: {token}"
             action = ACTION_MAP[token]
             _, reward, terminated, truncated, _ = env.step(action)
             step_count += 1
             if terminated or truncated:
                 break
+
+        env.close()
 
         if reward > 0 and step_count <= max_success_steps:
             return str(step_count)
@@ -324,29 +338,16 @@ def validate_output(
     with open(input_json, "r") as f:
         samples = [json.loads(line) for line in f]
 
-    validated = []
     for sample in tqdm(samples, desc="Validating Outputs"):
-        assert "token" in sample, f"Missing 'token' in sample: {sample}"
-        assert (
-            "start_pos" in sample and "facing" in sample
-        ), "Missing start_pos or facing"
-
-        env = EmptyEnv(
-            randomize=randomize,
-            size=env_size,
-            agent_start_pos=None,
-            render_mode="rgb_array",
-        )
-        sample["state"] = replay(
-            env, sample["token"], sample["start_pos"], sample["facing"]
-        )
-        validated.append(sample)
+        for key in ["start_pos", "goal_pos", "facing", "token"]:
+            assert key in sample, f"Missing required field '{key}' in sample"
+        sample["state"] = replay(sample)
 
     with open(output_json, "w") as f:
-        for item in validated:
+        for item in samples:
             f.write(json.dumps(item) + "\n")
 
-    print(f"✅ Verified {len(validated)} samples and saved to {output_json}")
+    print(f"✅ Verified {len(samples)} samples and saved to {output_json}")
 
 
 def train_and_evaluate_ppo(
