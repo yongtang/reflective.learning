@@ -52,7 +52,7 @@ class EmptyEnv(minigrid.envs.EmptyEnv):
             # Remove the default goal at bottom-right
             self.grid.set(width - 2, height - 2, None)
             # Place goal randomly
-            self.place_obj(Goal())
+            self.place_obj(minigrid.core.world_object.Goal())
 
 
 def orientation_aware_planner(start, goal, start_dir=0):
