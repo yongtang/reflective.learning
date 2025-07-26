@@ -27,6 +27,7 @@ import operator
 import os
 import random
 
+import diskcache
 import minigrid
 import numpy as np
 import PIL.Image
@@ -471,10 +472,10 @@ def train_sample(env_size, max_steps, num_samples, save_sample, save_image, rand
     print(f"Wrote {len(samples)} samples to {save_sample}")
 
 
-def train_continue(save_seed, save_image, save_cache, save_model, max_steps):
-    with open(save_seed, "r") as f:
-        data_seed = [json.loads(line) for line in f if line.strip()]
-    unique_string = set([entry["env"] for entry in data_seed])
+def train_initial(save_sample, max_steps, save_data):
+    with open(save_sample, "r") as f:
+        data_sample = [json.loads(line) for line in f if line.strip()]
+    unique_string = set([entry["env"] for entry in data_sample])
     assert len(unique_string) == 1
     unique_string = next(iter(unique_string))
     assert unique_string.startswith("MiniGrid-Empty-")
@@ -489,22 +490,56 @@ def train_continue(save_seed, save_image, save_cache, save_model, max_steps):
     unique_string = next(iter(unique_string))
     env_size = int(unique_string)
 
-    print(
-        f"Information: env_size={env_size}, max_steps={max_steps}, randomize={randomize}"
+    data_info = json.dumps(
+        {
+            "env_size": env_size,
+            "max_steps": max_steps,
+            "randomize": randomize,
+        }
     )
 
-    data_seed = [
-        {
-            **entry,
+    def f_seed(sample):
+        seed = {
+            "text": sample["text"],
+            "image": sample["image"],
+            "token": sample["token"][: max_steps + 1],
             "state": (
-                str(len(entry["token"]))
-                if len(entry["token"]) <= max_steps
+                str(len(sample["token"]))
+                if len(sample["token"]) <= max_steps
                 else str(max_steps + 1)
             ),
         }
-        for entry in data_seed
-    ]
-    print(data_seed)
+        return json.dumps(seed, sort_keys=True)
+
+    data_seed = "\n".join(set(f_seed(sample) for sample in data_sample)) + "\n"
+
+    os.makedirs(save_data, exist_ok=True)
+    with open(os.path.join(save_data, "info.json"), "w") as f:
+        f.write(data_info)
+    with open(os.path.join(save_data, "seed.json"), "w") as f:
+        f.write(data_seed)
+    with open(os.path.join(save_data, "stub.json"), "w") as f:
+        pass
+
+
+def train_continue(save_data, save_image):
+    with open(os.path.join(save_data, "info.json"), "r") as f:
+        data_info = json.loads(f.read())
+    print(f"Load info: {json.dumps(data_info)}")
+
+    data_seed = diskcache.Index(os.path.join(save_data, "seed.index"))
+    if len(data_seed) == 0:
+        with open(os.path.join(save_data, "seed.json"), "r") as f:
+            for i, line in enumerate(f):
+                data_seed[i] = json.loads(line)
+    print(f"Load seed: {len(data_seed)}")
+
+    data_stub = diskcache.Index(os.path.join(save_data, "stub.index"))
+    if len(data_stub) == 0:
+        with open(os.path.join(save_data, "stub.json"), "r") as f:
+            for i, line in enumerate(f):
+                data_stub[i] = json.loads(line)
+    print(f"Load stub: {len(data_stub)}")
 
 
 def main():
@@ -521,6 +556,7 @@ def main():
             "verify",
             "baseline",
             "sample",
+            "initial",
             "continue",
         ],
     )
@@ -546,14 +582,14 @@ def main():
         help="Max number of steps to count as success. > this = failure (state = n + 1)",
     )
 
-    # --mode sample/continue
+    # --mode sample/initial/continue
     parser.add_argument("--env-size", type=int)
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--num-samples", type=int)
     parser.add_argument("--save-sample")
     parser.add_argument("--save-image")
-    parser.add_argument("--save-cache")
     parser.add_argument("--save-model")
+    parser.add_argument("--save-data")
     # parser.add_argument("--randomize", type=bool, default=False)
 
     args = parser.parse_args()
@@ -639,21 +675,21 @@ def main():
             randomize=args.randomize,
         )
 
-    elif args.mode == "continue":
-        assert (
-            args.save_seed
-            and args.save_image
-            and args.save_cache
-            and args.save_model
-            and args.max_steps
+    elif args.mode == "initial":
+        assert args.save_sample and args.max_steps and args.save_data
+
+        train_initial(
+            save_sample=args.save_sample,
+            max_steps=args.max_steps,
+            save_data=args.save_data,
         )
 
+    elif args.mode == "continue":
+        assert args.save_data and args.save_image
+
         train_continue(
-            save_seed=args.save_seed,
+            save_data=args.save_data,
             save_image=args.save_image,
-            save_cache=args.save_cache,
-            save_model=args.save_model,
-            max_steps=args.max_steps,
         )
 
     else:
