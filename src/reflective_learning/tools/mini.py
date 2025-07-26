@@ -527,19 +527,27 @@ def train_continue(save_data, save_image):
         data_info = json.loads(f.read())
     print(f"Load info: {json.dumps(data_info)}")
 
-    data_seed = diskcache.Index(os.path.join(save_data, "seed.index"))
+    data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
     if len(data_seed) == 0:
         with open(os.path.join(save_data, "seed.json"), "r") as f:
             for i, line in enumerate(f):
-                data_seed[i] = json.loads(line)
+                data_seed.append(json.loads(line))
     print(f"Load seed: {len(data_seed)}")
 
-    data_stub = diskcache.Index(os.path.join(save_data, "stub.index"))
+    data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
     if len(data_stub) == 0:
         with open(os.path.join(save_data, "stub.json"), "r") as f:
             for i, line in enumerate(f):
-                data_stub[i] = json.loads(line)
+                data_stub.append(json.loads(line))
     print(f"Load stub: {len(data_stub)}")
+
+    while len(data_stub) > len(data_seed):
+        data_stub.popleft()
+    print(f"Chip stub: {len(data_stub)}")
+
+    while len(data_stub) < len(data_seed):
+        data_stub.append(data_seed.peek())
+    print(f"Fill stub: {len(data_stub)}")
 
 
 def main():
