@@ -313,7 +313,7 @@ def validate_output(
             goal=sample["goal_pos"],
             randomize=False,
             size=env_size,
-            agent_start_pos=sample["start_pos"],
+            agent_start_pos=np.array(sample["start_pos"]),
             agent_start_dir=STR_TO_DIR[sample["facing"]],
             render_mode="rgb_array",
         )
