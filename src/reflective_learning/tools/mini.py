@@ -23,6 +23,7 @@ import argparse
 import base64
 import functools
 import json
+import operator
 import os
 import random
 
@@ -34,6 +35,13 @@ from tqdm import tqdm
 
 from reflective_learning.inference import sample_multiple_sequences_batched
 from reflective_learning.model import ReflectiveCore
+
+action_space = ["left", "right", "forward"]
+facing_space = ["right", "down", "left", "up"]
+
+f_action = functools.partial(list.index, action_space)
+f_string_to_facing = functools.partial(list.index, facing_space)
+f_facing_to_string = functools.partial(operator.getitem, facing_space)
 
 ACTION_MAP = {"left": 0, "right": 1, "forward": 2}
 DIR_TO_STR = {0: "right", 1: "down", 2: "left", 3: "up"}
@@ -111,6 +119,29 @@ def find_goal_pos(grid):
     raise ValueError("Goal not found in grid")
 
 
+def inject_detours(actions, max_extra_steps):
+    """
+    Generate variants of the shortest path by injecting small detours (e.g., right→forward→left).
+    Each detour adds 2 steps.
+    """
+    variants = [actions]
+    for extra in range(1, max_extra_steps + 1):
+        path = list(actions)
+        count = 0
+        i = 0
+        while i < len(path) and count < extra:
+            if path[i] == "forward":
+                # Replace one forward with right → forward → left
+                path = path[:i] + ["right", "forward", "left"] + path[i + 1 :]
+                i += 3
+                count += 2
+            else:
+                i += 1
+        if len(path) == len(actions) + extra:
+            variants.append(path)
+    return variants
+
+
 def generate_samples(
     randomize,
     env_size,
@@ -120,27 +151,6 @@ def generate_samples(
     include_labels=True,
     max_success_steps=None,
 ):
-    def inject_detours(actions, max_extra_steps):
-        """
-        Generate variants of the shortest path by injecting small detours (e.g., right→forward→left).
-        Each detour adds 2 steps.
-        """
-        variants = [actions]
-        for extra in range(1, max_extra_steps + 1):
-            path = list(actions)
-            count = 0
-            i = 0
-            while i < len(path) and count < extra:
-                if path[i] == "forward":
-                    # Replace one forward with right → forward → left
-                    path = path[:i] + ["right", "forward", "left"] + path[i + 1 :]
-                    i += 3
-                    count += 2
-                else:
-                    i += 1
-            if len(path) == len(actions) + extra:
-                variants.append(path)
-        return variants
 
     samples = []
     filenames = set()
@@ -397,6 +407,106 @@ def train_and_evaluate_ppo(
     )
 
 
+def train_sample(env_size, max_steps, num_samples, save_sample, save_image, randomize):
+
+    samples = []
+
+    os.makedirs(save_image, exist_ok=True)
+
+    with tqdm(total=num_samples, desc="Generating Samples") as progress:
+        for index in range(num_samples):
+            env = EmptyEnv(
+                randomize=randomize,
+                size=env_size,
+                agent_start_pos=None,
+                render_mode="rgb_array",
+            )
+            env.reset()
+
+            goal = find_goal_pos(env.unwrapped.grid)
+            start = list(env.unwrapped.agent_pos)
+            facing = f_facing_to_string(env.unwrapped.agent_dir)
+
+            filename = f"goal_{goal[0]}_{goal[1]}_start_{start[0]}_{start[1]}_facing_{facing}.png"
+            if not os.path.exists(os.path.join(save_image, filename)):
+
+                img = env.render()
+                image = PIL.Image.fromarray(img)
+                image.save(os.path.join(save_image, filename))
+
+            sample = {
+                "text": [
+                    f"goal {goal[0]},{goal[1]}",
+                    f"start {start[0]},{start[1]}",
+                    f"facing {facing}",
+                ],
+                "image": [filename],
+                "env": (
+                    f"MiniGrid-Empty-Random-{env_size}x{env_size}"
+                    if randomize
+                    else f"MiniGrid-Empty-{env_size}x{env_size}"
+                ),
+                "goal": [int(x) for x in goal],
+                "start": [int(x) for x in start],
+                "facing": facing,
+            }
+
+            shortest = orientation_aware_planner(
+                start, goal, f_string_to_facing(facing)
+            )
+            max_extra_steps = max(0, max_steps - len(shortest))
+            variants = inject_detours(shortest, max_extra_steps)
+            sample["token"] = random.choice(variants)
+
+            samples.append(sample)
+            env.close()
+            progress.update(1)
+
+    json_strings = [json.dumps(sample, sort_keys=True) for sample in samples]
+    unique_json_strings = list(set(json_strings))
+
+    with open(save_sample, "w") as f:
+        f.write("\n".join(unique_json_strings) + "\n")
+
+    print(f"Wrote {len(samples)} samples to {save_sample}")
+
+
+def train_continue(save_seed, save_image, save_cache, save_model, max_steps):
+    with open(save_seed, "r") as f:
+        data_seed = [json.loads(line) for line in f if line.strip()]
+    unique_string = set([entry["env"] for entry in data_seed])
+    assert len(unique_string) == 1
+    unique_string = next(iter(unique_string))
+    assert unique_string.startswith("MiniGrid-Empty-")
+    unique_string = unique_string.removeprefix("MiniGrid-Empty-")
+    if unique_string.startswith("Random-"):
+        randomize = True
+        unique_string = unique_string.removeprefix("Random-")
+    else:
+        randomize = False
+    unique_string = set(unique_string.split("x"))
+    assert len(unique_string) == 1
+    unique_string = next(iter(unique_string))
+    env_size = int(unique_string)
+
+    print(
+        f"Information: env_size={env_size}, max_steps={max_steps}, randomize={randomize}"
+    )
+
+    data_seed = [
+        {
+            **entry,
+            "state": (
+                str(len(entry["token"]))
+                if len(entry["token"]) <= max_steps
+                else str(max_steps + 1)
+            ),
+        }
+        for entry in data_seed
+    ]
+    print(data_seed)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MiniGrid Model Pipeline CLI (Reflective + RL)"
@@ -404,7 +514,15 @@ def main():
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["seed", "stub", "predict", "verify", "baseline"],
+        choices=[
+            "seed",
+            "stub",
+            "predict",
+            "verify",
+            "baseline",
+            "sample",
+            "continue",
+        ],
     )
     parser.add_argument("--randomize", type=bool, default=False)
     parser.add_argument("--env", type=int, default=6)
@@ -425,11 +543,22 @@ def main():
     parser.add_argument(
         "--max-success-steps",
         type=int,
-        required=True,
         help="Max number of steps to count as success. > this = failure (state = n + 1)",
     )
 
+    # --mode sample/continue
+    parser.add_argument("--env-size", type=int)
+    parser.add_argument("--max-steps", type=int)
+    parser.add_argument("--num-samples", type=int)
+    parser.add_argument("--save-sample")
+    parser.add_argument("--save-image")
+    parser.add_argument("--save-cache")
+    parser.add_argument("--save-model")
+    # parser.add_argument("--randomize", type=bool, default=False)
+
     args = parser.parse_args()
+
+    print(f"args: {vars(args)}")
 
     if args.mode == "seed":
         assert args.output, "--output is required for --mode seed"
@@ -490,6 +619,41 @@ def main():
             args.timesteps,
             args.episodes,
             save_path=args.save_model,
+        )
+
+    elif args.mode == "sample":
+        assert (
+            args.env_size
+            and args.max_steps
+            and args.num_samples
+            and args.save_sample
+            and args.save_image
+        )
+
+        train_sample(
+            env_size=args.env_size,
+            max_steps=args.max_steps,
+            num_samples=args.num_samples,
+            save_sample=args.save_sample,
+            save_image=args.save_image,
+            randomize=args.randomize,
+        )
+
+    elif args.mode == "continue":
+        assert (
+            args.save_seed
+            and args.save_image
+            and args.save_cache
+            and args.save_model
+            and args.max_steps
+        )
+
+        train_continue(
+            save_seed=args.save_seed,
+            save_image=args.save_image,
+            save_cache=args.save_cache,
+            save_model=args.save_model,
+            max_steps=args.max_steps,
         )
 
     else:
