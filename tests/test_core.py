@@ -34,8 +34,11 @@ def test_reflective_transformer_forward_and_loss():
     d_model = decoder.layers[0].linear1.in_features
     prefix = torch.zeros(batch_size, max_prefix_len, d_model)  # [B, C, d_model]
 
-    logits = model(token, state, prefix=prefix)
-    assert logits.shape == (batch_size, max_seq_len, vocab_size, state_size)
+    input = token[:, :-1]  # [B, T-1]
+    label = token[:, -1]  # [B]
 
-    loss = model.loss(logits, token, state)
+    logit = model(input, state, prefix=prefix)  # [B, 1, V, S]
+    assert logit.shape == (batch_size, vocab_size, state_size)
+
+    loss = model.loss(logit, label, state)  # [B] target
     assert loss.item() > 0

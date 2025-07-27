@@ -1,61 +1,76 @@
 import torch
 import torch.nn.functional as F
 
+
 def sequence(
     model,
-    state_weights: dict,
     prefix: torch.Tensor,
+    state_weights: dict,
     stop_token: int,
-    max_seq_len: int = 128,
+    max_seq_len: int,
     device: str = "cpu",
-):
+) -> torch.Tensor:
     """
-    Greedy sampling of a single token sequence from the model given a context prefix
-    and state weights. Uses model.forward() for simplicity.
+    Generate a single token sequence using a fixed prefix and state-weighted sampling.
 
     Args:
-        model: ReflectiveCore instance
-        state_weights: dict of {state_index: weight}
-        prefix: [C, d_model] tensor
-        stop_token: token id that terminates generation (e.g. 0)
-        max_seq_len: maximum tokens to generate (excluding prefix)
-        device: execution device
+        model: Trained ReflectiveCore model.
+        prefix (Tensor): [C, d_model] prefix embedding.
+        state_weights (dict): Mapping from state index to probability.
+        stop_token (int): Token that terminates generation.
+        max_seq_len (int): Maximum number of tokens to generate.
+        device (str): Device for computation.
 
     Returns:
-        List[int]: sampled token sequence
+        Tensor: [T] of generated token indices.
     """
     model.eval()
-    state_indices = list(state_weights.keys())
-    state_weight_tensor = torch.zeros(model.state_size, device=device)
-    for s, w in state_weights.items():
-        state_weight_tensor[s] = w
-    state_weight_tensor /= state_weight_tensor.sum()
 
-    tokens, states = [], []
+    V = model.vocab_size
+    S = model.state_size
+    prefix = prefix.unsqueeze(0).to(device)  # [1, C, d_model]
 
-    with torch.no_grad():
-        for _ in range(max_seq_len):
-            token_tensor = torch.tensor(
-                tokens, dtype=torch.long, device=device
-            ).unsqueeze(0)
-            state_tensor = torch.tensor(
-                [state_indices[0]] * len(tokens), dtype=torch.long, device=device
-            ).unsqueeze(0)
+    # Prepare static state indices and weights
+    state_indices = torch.arange(S, device=device)  # [S]
+    state_weights_tensor = torch.tensor(
+        [state_weights[s.item()] for s in state_indices], device=device
+    )  # [S]
+    state_weights_tensor = state_weights_tensor / state_weights_tensor.sum()
 
-            logits = model.forward(
-                token_tensor, state_tensor, prefix.to(device)
-            )  # [1, T, V, S]
-            logits = logits[0, -1]  # [V, S]
+    tokens = torch.empty(0, dtype=torch.long, device=device)  # [T]
+    for _ in range(max_seq_len):
+        T = tokens.shape[0]
 
-            probs = (F.softmax(logits, dim=0) @ state_weight_tensor).clamp(min=1e-8)
-            probs /= probs.sum()
+        # Repeat tokens and states over all S states
+        token_input = (
+            tokens.unsqueeze(0).expand(S, -1)
+            if T > 0
+            else torch.empty(S, 0, dtype=torch.long, device=device)
+        )  # [S, T]
+        state_input = state_indices  # [S]
+        prefix_input = prefix.expand(S, -1, -1)  # [S, C, d_model]
 
-            next_token = torch.multinomial(probs, num_samples=1).item()
-            tokens.append(next_token)
-            states.append(state_indices[0])  # Fixed per-sequence state
+        logits = model.forward(token_input, state_input, prefix_input)  # [S, T, V, S]
 
-            if next_token == stop_token:
-                break
+        # Get next-token logits for each state
+        logits_last = logits[:, -1] if T > 0 else logits[:, 0]  # [S, V, S]
+
+        # Diagonal select P(token | state=s)
+        diag_logits = logits_last.permute(1, 0, 2).diagonal(dim1=1, dim2=2).T  # [S, V]
+
+        # Weighted sum across states
+        probs = (diag_logits.softmax(dim=-1) * state_weights_tensor[:, None]).sum(
+            dim=0
+        )  # [V]
+
+        # Sample next token
+        next_token = torch.multinomial(probs, num_samples=1).item()
+
+        # Append
+        tokens = torch.cat([tokens, torch.tensor([next_token], device=device)])
+
+        if next_token == stop_token:
+            break
 
     return tokens
 

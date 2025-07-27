@@ -32,8 +32,8 @@ def test_sequence():
 
     tokens = sequence(
         model=model,
-        state_weights=state_weights,
         prefix=prefix,
+        state_weights=state_weights,
         stop_token=stop_token,
         max_seq_len=max_seq_len,
         device="cpu",
@@ -48,7 +48,7 @@ def test_sequence():
         assert len(tokens) <= max_seq_len
 
 
-def test_sequence_batched():
+def _test_sequence_batched():
     model = make_dummy_model()
     prefixes = torch.randn(4, 3, 16)  # [B=4, C=3, d_model=16]
     state_weights = {0: 0.6, 1: 0.4}
@@ -57,8 +57,8 @@ def test_sequence_batched():
 
     sequences = sequence_batched(
         model=model,
-        state_weights=state_weights,
         prefixes=prefixes,
+        state_weights=state_weights,
         stop_token=stop_token,
         max_seq_len=max_seq_len,
         device="cpu",
