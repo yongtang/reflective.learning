@@ -408,6 +408,21 @@ def train_and_evaluate_ppo(
     )
 
 
+class IterableDataset(torch.utils.data.IterableDataset):
+    def __init__(self, seed, stub, chance):
+        super(IterableDataset).__init__()
+        self.seed = seed
+        self.stub = stub
+        self.chance = chance
+
+    def __iter__(self):
+        while True:
+            if len(self.stub) == 0 or random.random() > self.chance:
+                yield random.choice(self.seed)
+            else:
+                yield random.choice(self.stub)
+
+
 def train_sample(env_size, max_steps, num_samples, save_sample, save_image, randomize):
 
     samples = []
@@ -541,13 +556,13 @@ def train_continue(save_data, save_image):
                 data_stub.append(json.loads(line))
     print(f"Load stub: {len(data_stub)}")
 
-    while len(data_stub) > len(data_seed):
-        data_stub.popleft()
-    print(f"Chip stub: {len(data_stub)}")
+    def data_func():
 
-    while len(data_stub) < len(data_seed):
-        data_stub.append(data_seed.peek())
-    print(f"Fill stub: {len(data_stub)}")
+        return {}
+
+    entries = iter(IterableDataset(data_seed, data_stub, chance=0.5))
+    for i in range(2 * len(data_seed)):
+        print(next(entries))
 
 
 def main():
