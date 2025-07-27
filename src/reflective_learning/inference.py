@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-
 def sequence(
     model,
     state_weights: dict,
