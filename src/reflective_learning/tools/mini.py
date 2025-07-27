@@ -37,6 +37,7 @@ from tqdm import tqdm
 from reflective_learning.inference import sample_multiple_sequences_batched
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.tools.main import ContextEncoder
+from reflective_learning.train import collate_with_prefix
 
 action_space = ["left", "right", "forward"]
 facing_space = ["right", "down", "left", "up"]
@@ -582,7 +583,7 @@ def train_continue(save_data, save_image, device):
     print(f"Load stub: {len(data_stub)}")
 
     dataset = IterableDataset(data_seed, data_stub, chance=0.5)
-    dataloader = DataLoader(
+    dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=True,
