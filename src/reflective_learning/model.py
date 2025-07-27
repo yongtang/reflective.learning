@@ -13,112 +13,119 @@ class ReflectiveCore(nn.Module):
         decoder: nn.TransformerDecoder,
     ):
         """
-        Initializes the ReflectiveCore Transformer model.
+        ReflectiveCore Transformer model that predicts P(token | context, state).
 
         Args:
-            vocab_size (int): Size of the vocabulary (number of token classes).
-            state_size (int): Number of mutually exclusive state classes.
-            max_seq_len (int): Maximum token sequence length.
-            max_prefix_len (int): Maximum prefix (context) length.
-            decoder (nn.TransformerDecoder): Transformer decoder module.
+            vocab_size: Number of token classes.
+            state_size: Number of mutually exclusive state classes.
+            max_seq_len: Max token sequence length (for position embeddings).
+            max_prefix_len: Max prefix length (prepended to each sequence).
+            decoder: Standard nn.TransformerDecoder module.
         """
         super().__init__()
 
         d_model = decoder.layers[0].linear1.in_features
-
         self.vocab_size = vocab_size
         self.state_size = state_size
         self.d_model = d_model
 
+        # Project one-hot token × state to d_model
         self.input_linear = nn.Linear(vocab_size * state_size, d_model)
+
+        # Output logits over joint token-state space
         self.output_linear = nn.Linear(d_model, vocab_size * state_size)
+
+        # Positional embeddings for prefix + sequence
         self.pos_embedding = nn.Embedding(max_seq_len + max_prefix_len, d_model)
 
         self.decoder = decoder
 
     def forward(
         self,
-        token_ids: torch.Tensor,  # [B, T]
-        state_ids: torch.Tensor,  # [B]
+        token: torch.Tensor,  # [B, T]
+        state: torch.Tensor,  # [B]
         prefix: torch.Tensor,  # [B, C, d_model]
-        mask: torch.Tensor = None,  # Optional [L, L] or [B, L, L] boolean mask
+        mask: torch.Tensor = None,  # Optional [L, L] or [B, L, L] attention mask
     ) -> torch.Tensor:
         """
-        Forward interface for token/state ID inputs.
+        Forward pass using token/state indices and prefix.
 
         Args:
-            token_ids (Tensor): [B, T] LongTensor of token indices.
-            state_ids (Tensor): [B] LongTensor of fixed state index per sequence.
-            prefix (Tensor): [B, C, d_model] context prefix embeddings.
-            mask (Tensor, optional): [L, L] or [B, L, L] boolean causal attention mask.
+            token: [B, T] LongTensor of token indices.
+            state: [B] LongTensor, single state index per sequence.
+            prefix: [B, C, d_model] prefix embeddings to prepend.
+            mask: Optional causal attention mask.
 
         Returns:
-            Tensor: [B, T, vocab_size, state_size] output logits (excluding prefix).
+            [B, T, vocab_size, state_size] output logits.
         """
         assert prefix is not None, "prefix is required"
-        B, T = token_ids.shape
+        B, T = token.shape
         V, S = self.vocab_size, self.state_size
 
-        # One-hot encode tokens and states
-        token_onehot = F.one_hot(token_ids, num_classes=V).float()  # [B, T, V]
-        state_onehot = F.one_hot(state_ids, num_classes=S).float()  # [B, S]
+        # One-hot encode inputs
+        token_onehot = F.one_hot(token, num_classes=V).float()  # [B, T, V]
+        state_onehot = F.one_hot(state, num_classes=S).float()  # [B, S]
         state_onehot = state_onehot.unsqueeze(1)  # [B, 1, S]
 
-        # Outer product over tokens and state
-        joint_input = torch.einsum("btv, bks -> btvs", token_onehot, state_onehot)
-        x = joint_input.view(B, T, V * S)  # [B, T, V*S]
-        x = self.input_linear(x)  # [B, T, d_model]
+        # Outer product to get [B, T, V, S]
+        joint_input = torch.einsum("btv,bks->btvs", token_onehot, state_onehot)
+        joint_flat = joint_input.view(B, T, V * S)  # [B, T, V*S]
 
-        # Concatenate prefix
+        x = self.input_linear(joint_flat)  # [B, T, d_model]
         x = torch.cat([prefix, x], dim=1)  # [B, C+T, d_model]
+
         logits = self.call(x, mask=mask)  # [B, C+T, V, S]
-        return logits[:, prefix.shape[1] :]  # Return token-only logits
+        return logits[:, prefix.shape[1] :]  # Drop prefix outputs
 
     def call(self, embed: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         """
-        Forward pass for pre-embedded inputs.
+        Forward pass for precomputed embeddings.
 
         Args:
-            embed (Tensor): [B, L, d_model] input embeddings (prefix + token sequence).
-            mask (Tensor, optional): [L, L] or [B, L, L] boolean attention mask.
+            embed: [B, L, d_model] real-valued embeddings (prefix + tokens).
+            mask: Optional [L, L] or [B, L, L] attention mask.
 
         Returns:
-            Tensor: [B, L, vocab_size, state_size] output logits.
+            [B, L, vocab_size, state_size] logits.
         """
-        assert embed is not None, "prefix/embed is required"
-
+        assert embed is not None, "embed (with prefix) is required"
         B, L, _ = embed.shape
+
+        # Add positional embeddings
         pos_ids = (
             torch.arange(L, device=embed.device).unsqueeze(0).expand(B, L)
         )  # [B, L]
         x = embed + self.pos_embedding(pos_ids)  # [B, L, d_model]
 
-        # PyTorch >= 2.0 supports both 2D and 3D masks directly
         x = self.decoder(x, x, tgt_mask=mask)  # [B, L, d_model]
-        logits = self.output_linear(x)  # [B, L, V * S]
+        logits = self.output_linear(x)  # [B, L, V*S]
         return logits.view(B, L, self.vocab_size, self.state_size)  # [B, L, V, S]
 
     def loss(
         self,
         logits: torch.Tensor,  # [B, T, V, S]
-        token_ids: torch.Tensor,  # [B, T]
-        state_ids: torch.Tensor,  # [B]
+        token: torch.Tensor,  # [B, T]
+        state: torch.Tensor,  # [B]
     ) -> torch.Tensor:
         """
-        Computes training loss using one-hot supervision.
+        Computes cross-entropy loss against (token, state) targets.
 
         Args:
-            logits (Tensor): [B, T, vocab_size, state_size] model outputs.
-            token_ids (Tensor): [B, T] ground truth token indices.
-            state_ids (Tensor): [B] ground truth fixed state per sequence.
+            logits: [B, T, vocab_size, state_size] output from the model.
+            token: [B, T] ground truth token indices.
+            state: [B] ground truth single state per sequence.
 
         Returns:
-            Tensor: Scalar loss value (cross entropy).
+            Scalar loss (cross entropy).
         """
         B, T, V, S = logits.shape
+        assert state.shape == (B,), "Each sequence must have a single state"
 
-        # Broadcast state_ids across time
-        state_ids_exp = state_ids.unsqueeze(1).expand(-1, T)  # [B, T]
-        target = state_ids_exp * V + token_ids  # [B, T]
+        # Broadcast state across sequence
+        state_expanded = state.unsqueeze(1).expand(-1, T)  # [B, T]
+        target = state_expanded * V + token  # [B, T] as flat index
+
         logits_flat = logits.view(B * T, V * S)
-        return F.cross_entropy(logits_flat, target.view(-1))
+        target_flat = target.view(-1)
+        return F.cross_entropy(logits_flat, target_flat)
