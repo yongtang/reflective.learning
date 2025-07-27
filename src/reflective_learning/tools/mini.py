@@ -559,7 +559,7 @@ def f_data(data, save_image, context_encoder):
     return data
 
 
-def train_continue(save_data, save_image, device):
+def train_continue(save_data, save_image, batch_size, device):
     with open(os.path.join(save_data, "info.json"), "r") as f:
         data_info = json.loads(f.read())
     print(f"Load info: {json.dumps(data_info)}")
@@ -582,15 +582,6 @@ def train_continue(save_data, save_image, device):
                 data_stub.append(f_data(json.loads(line), save_image, context_encoder))
     print(f"Load stub: {len(data_stub)}")
 
-    dataset = IterableDataset(data_seed, data_stub, chance=0.5)
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=lambda batch: collate_with_prefix(batch, model),
-    )
-    entries = iter(dataloader)
-
     model = ReflectiveCore(
         vocab_size=len(action_space),
         state_size=data_info["max_steps"] + 2,
@@ -602,6 +593,15 @@ def train_continue(save_data, save_image, device):
     print(f"Load model: {os.path.join(save_data, 'model.pt')}")
 
     model.train()
+
+    dataset = IterableDataset(data_seed, data_stub, chance=0.5)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=lambda batch: collate_with_prefix(batch, model),
+    )
+    entries = iter(dataloader)
 
     with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
         for step in range(total):
@@ -755,11 +755,12 @@ def main():
         )
 
     elif args.mode == "continue":
-        assert args.save_data and args.save_image
+        assert args.save_data and args.save_image and args.batch_size
 
         train_continue(
             save_data=args.save_data,
             save_image=args.save_image,
+            batch_size=args.batch_size,
             device=args.device,
         )
 
