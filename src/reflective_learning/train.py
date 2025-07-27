@@ -1,4 +1,5 @@
 import os
+from typing import Callable, Optional
 
 import torch
 from tqdm import tqdm
@@ -38,19 +39,12 @@ def train(
     saved = []
 
     count = 0
-    data_iter = iter(dataloader)
 
     with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
-        while count < total:
-            try:
-                batch = next(data_iter)
-            except StopIteration:
-                data_iter = iter(dataloader)
-                batch = next(data_iter)
-
+        for batch in dataloader:
             model.train()
-            embed = batch["embed"].to(device)
             mask = batch["mask"].to(device)
+            embed = batch["embed"].to(device)
             token_target = batch["token_target"].to(device)
             state_target = batch["state_target"].to(device)
 
@@ -58,6 +52,7 @@ def train(
             logits = logits[:, -token_target.size(1) - 1 : -1]
 
             loss = model.loss(logits, token_target, state_target)
+            loss_value = loss.item()
 
             optimizer.zero_grad()
             loss.backward()
@@ -66,13 +61,14 @@ def train(
             batch_size = embed.size(0)
             count += batch_size
             progress.update(batch_size)
-            progress.set_postfix(loss=f"{loss.item():.4f}", samples=count)
+            progress.set_postfix(loss=f"{loss_value:.4f}", samples=count)
 
             # Save model periodically
             if count % save_interval < batch_size:
                 filename = os.path.join(save_data, f"model_{count}.pt")
                 torch.save(model.state_dict(), filename)
                 saved.append(filename)
+                progress.write(f"[Checkpoint] Saved to {filename}")
                 if len(saved) > 3:
                     oldest = saved.pop(0)
                     if os.path.exists(oldest):
@@ -82,6 +78,10 @@ def train(
             if callback_func and count % callback_interval < batch_size:
                 callback_func(model, count)
 
+            if count >= total:
+                break
+
     # Final model save
     final_filename = os.path.join(save_data, "model.pt")
     torch.save(model.state_dict(), final_filename)
+    tqdm.write(f"[Final Save] Saved to {final_filename}")
