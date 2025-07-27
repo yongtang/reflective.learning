@@ -650,13 +650,13 @@ def train_continue(
 
             progress.update(1)
 
-        if (step + 1) % save_interval == 1:
-            interval.append(os.path.join(save_data, f"model_{step:03d}.pt"))
-            torch.save(model.state_dict(), interval[-1])
-            if len(interval) > 3:
-                oldest = interval.pop(0)
-                if os.path.exists(oldest):
-                    os.remove(oldest)
+            if (step + 1) % save_interval == 1:
+                interval.append(os.path.join(save_data, f"model_{step:03d}.pt"))
+                torch.save(model.state_dict(), interval[-1])
+                if len(interval) > 3:
+                    oldest = interval.pop(0)
+                    if os.path.exists(oldest):
+                        os.remove(oldest)
 
     torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
     print(f"Save model: {os.path.join(save_data, 'model.pt')}")
