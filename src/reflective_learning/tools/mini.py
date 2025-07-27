@@ -412,7 +412,7 @@ def train_and_evaluate_ppo(
 
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed, stub, chance):
-        super(IterableDataset).__init__()
+        super().__init__()
         self.seed = seed
         self.stub = stub
         self.chance = chance
