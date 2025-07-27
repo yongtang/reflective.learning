@@ -647,6 +647,9 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
 
             progress.update(1)
 
+    torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
+    print(f"Save model: {os.path.join(save_data, 'model.pt')}")
+
 
 def main():
     parser = argparse.ArgumentParser(
