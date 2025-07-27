@@ -625,12 +625,13 @@ def train_continue(
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    model.train()
     with tqdm(total=batch_total, desc="Training", leave=True, ncols=100) as progress:
         interval = []
         total_loss = 0.0
         for step in range(batch_total):
             batch = next(entries)
+
+            model.train()
 
             embed, mask = batch["embed"], batch["mask"]
             token_target = batch["token_target"]
@@ -649,6 +650,10 @@ def train_continue(
             progress.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
             progress.update(1)
+
+            model.eval()
+            with torch.no_grad():
+                pass
 
             if (step + 1) % save_interval == 1:
                 interval.append(os.path.join(save_data, f"model_{step:03d}.pt"))
