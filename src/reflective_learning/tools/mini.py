@@ -545,18 +545,32 @@ def train_initial(save_sample, max_steps, save_data):
     torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
 
 
-def f_data(data, save_image, context_encoder):
+def f_data(data, save_image, context_encoder, model):
     if "text" not in data or "image" not in data:
         raise ValueError(f"'text' or 'image' does not exist: {data}")
     if not isinstance(data["text"], list) or not isinstance(data["image"], list):
         raise ValueError(f"'text' or 'image' is not a list: {data}")
 
-    data["token"] = [f_action(token) for token in data["token"]]
-    data["state"] = int(data["state"])
+    max_seq_len = model.pos_embedding.num_embeddings - 512
+
+    data_token = [f_action(token) for token in data["token"]]
+    data_state = int(data["state"])
 
     images = [os.path.join(save_image, image) for image in data["image"]]
-    data["prefix"] = context_encoder.encode(data["text"], images)
-    return data
+    prefix = context_encoder.encode(data["text"], images)
+
+    # Pad or truncate token sequence
+    padded = (data_token + [0] * max_seq_len)[:max_seq_len]
+    token_ids = torch.tensor(padded, dtype=torch.long)
+
+    # Repeat state ID across sequence
+    state_ids = torch.full((max_seq_len,), data_state, dtype=torch.long)
+
+    return {
+        "token_ids": token_ids,
+        "state_ids": state_ids,
+        "prefix": prefix,
+    }
 
 
 def train_continue(save_data, save_image, batch_size, batch_total, device):
@@ -565,22 +579,6 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
     print(f"Load info: {json.dumps(data_info)}")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-
-    context_encoder = ContextEncoder.from_pretrained(save_data, device=device)
-
-    data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
-    if len(data_seed) == 0:
-        with open(os.path.join(save_data, "seed.json"), "r") as f:
-            for i, line in enumerate(f):
-                data_seed.append(f_data(json.loads(line), save_image, context_encoder))
-    print(f"Load seed: {len(data_seed)}")
-
-    data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
-    if len(data_stub) == 0:
-        with open(os.path.join(save_data, "stub.json"), "r") as f:
-            for i, line in enumerate(f):
-                data_stub.append(f_data(json.loads(line), save_image, context_encoder))
-    print(f"Load stub: {len(data_stub)}")
 
     model = ReflectiveCore(
         vocab_size=len(action_space),
@@ -592,7 +590,25 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
     )
     print(f"Load model: {os.path.join(save_data, 'model.pt')}")
 
-    model.train()
+    context_encoder = ContextEncoder.from_pretrained(save_data, device=device)
+
+    data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
+    if len(data_seed) == 0:
+        with open(os.path.join(save_data, "seed.json"), "r") as f:
+            for i, line in enumerate(f):
+                data_seed.append(
+                    f_data(json.loads(line), save_image, context_encoder, model)
+                )
+    print(f"Load seed: {len(data_seed)}")
+
+    data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
+    if len(data_stub) == 0:
+        with open(os.path.join(save_data, "stub.json"), "r") as f:
+            for i, line in enumerate(f):
+                data_stub.append(
+                    f_data(json.loads(line), save_image, context_encoder, model)
+                )
+    print(f"Load stub: {len(data_stub)}")
 
     dataset = IterableDataset(data_seed, data_stub, chance=0.5)
     dataloader = torch.utils.data.DataLoader(
@@ -602,6 +618,7 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
     )
     entries = iter(dataloader)
 
+    model.train()
     with tqdm(total=batch_total, desc="Training", leave=True, ncols=100) as progress:
         for step in range(batch_total):
             batch = next(entries)
