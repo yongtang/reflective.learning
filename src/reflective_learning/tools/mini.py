@@ -598,7 +598,6 @@ def train_continue(save_data, save_image, batch_size, device):
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=True,
         collate_fn=lambda batch: collate_with_prefix(batch, model),
     )
     entries = iter(dataloader)
