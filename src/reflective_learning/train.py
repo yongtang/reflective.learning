@@ -6,86 +6,9 @@ from tqdm import tqdm
 from reflective_learning.model import ReflectiveCore
 
 
-def collate_with_prefix(batch, model):
-    """
-    Collate function for variable-length prefix support.
-
-    - Projects (token_id, state_id) pairs to embeddings
-    - Concatenates prefix + projected token embeddings
-    - Computes per-example attention masks
-    - Pads [L, d_model] and [L, L] to max length across batch
-
-    Returns:
-        {
-            "embed": FloatTensor [B, L, d_model],
-            "mask": FloatTensor [B, L, L],
-            "token_target": LongTensor [B, T-1],
-            "state_target": LongTensor [B, T-1],
-        }
-    """
-    device = next(model.parameters()).device
-    d_model = model.d_model
-    V, S = model.vocab_size, model.state_size
-
-    embeds, masks = [], []
-    token_targets, state_targets = [], []
-    max_len = 0
-
-    for example in batch:
-        token_ids = example["token_ids"].to(device)  # [T]
-        state_ids = example["state_ids"].to(device)  # [T]
-        prefix = example["prefix"].to(device)  # [C, d_model]
-
-        T = token_ids.size(0)
-        x = torch.zeros(T, V, S, device=device)  # [T, V, S]
-        x.scatter_(1, token_ids.view(T, 1, 1), 1.0)  # one-hot over tokens
-        x.scatter_(2, state_ids.view(T, 1, 1), 1.0)  # one-hot over states
-        x = x.view(T, V * S)  # [T, V*S]
-
-        projected = model.input_linear(x)  # [T, d_model]
-        embed = torch.cat([prefix, projected], dim=0)  # [L, d_model]
-        embeds.append(embed)
-
-        L = embed.size(0)
-        max_len = max(max_len, L)
-
-        # Causal mask
-        causal_mask = torch.triu(torch.ones(L, L, device=device), diagonal=1).bool()
-        mask = torch.zeros(L, L, device=device)
-        mask.masked_fill_(causal_mask, float("-inf"))
-        masks.append(mask)
-
-        token_targets.append(token_ids[1:])  # [T-1]
-        state_targets.append(state_ids[1:])  # [T-1]
-
-    B = len(batch)
-    padded_embed = torch.zeros(B, max_len, d_model, device=device)
-    padded_mask = torch.full((B, max_len, max_len), float("-inf"), device=device)
-
-    for i in range(B):
-        L = embeds[i].size(0)
-        padded_embed[i, :L] = embeds[i]
-        padded_mask[i, :L, :L] = masks[i]
-
-    max_tgt = max(t.size(0) for t in token_targets)
-    padded_tokens = torch.zeros(B, max_tgt, dtype=torch.long, device=device)
-    padded_states = torch.zeros(B, max_tgt, dtype=torch.long, device=device)
-
-    for i in range(B):
-        padded_tokens[i, : token_targets[i].size(0)] = token_targets[i]
-        padded_states[i, : state_targets[i].size(0)] = state_targets[i]
-
-    return {
-        "embed": padded_embed,
-        "mask": padded_mask,
-        "token_target": padded_tokens,
-        "state_target": padded_states,
-    }
-
-
 def train(
     model: ReflectiveCore,
-    dataloader: DataLoader,
+    dataloader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     total: int,
     save_data: str,
