@@ -36,6 +36,7 @@ from tqdm import tqdm
 
 from reflective_learning.inference import sample_multiple_sequences_batched
 from reflective_learning.model import ReflectiveCore
+from reflective_learning.tools.main import ContextEncoder
 
 action_space = ["left", "right", "forward"]
 facing_space = ["right", "down", "left", "up"]
@@ -536,33 +537,78 @@ def train_initial(save_sample, max_steps, save_data):
     with open(os.path.join(save_data, "stub.json"), "w") as f:
         pass
 
+    model = ReflectiveCore(
+        vocab_size=len(action_space),
+        state_size=max_steps + 2,
+    )
+    torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
 
-def train_continue(save_data, save_image):
+
+def f_data(data, save_image, context_encoder):
+    if "text" not in data or "image" not in data:
+        raise ValueError(f"'text' or 'image' does not exist: {data}")
+    if not isinstance(data["text"], list) or not isinstance(data["image"], list):
+        raise ValueError(f"'text' or 'image' is not a list: {data}")
+
+    data["token"] = [f_action(token) for token in data["token"]]
+    data["state"] = int(data["state"])
+
+    images = [os.path.join(save_image, image) for image in data["image"]]
+    data["prefix"] = context_encoder.encode(data["text"], images)
+    return data
+
+
+def train_continue(save_data, save_image, device):
     with open(os.path.join(save_data, "info.json"), "r") as f:
         data_info = json.loads(f.read())
     print(f"Load info: {json.dumps(data_info)}")
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    context_encoder = ContextEncoder.from_pretrained(save_data, device=device)
 
     data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
     if len(data_seed) == 0:
         with open(os.path.join(save_data, "seed.json"), "r") as f:
             for i, line in enumerate(f):
-                data_seed.append(json.loads(line))
+                data_seed.append(f_data(json.loads(line), save_image, context_encoder))
     print(f"Load seed: {len(data_seed)}")
 
     data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
     if len(data_stub) == 0:
         with open(os.path.join(save_data, "stub.json"), "r") as f:
             for i, line in enumerate(f):
-                data_stub.append(json.loads(line))
+                data_stub.append(f_data(json.loads(line), save_image, context_encoder))
     print(f"Load stub: {len(data_stub)}")
 
-    def data_func():
+    dataset = IterableDataset(data_seed, data_stub, chance=0.5)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=lambda batch: collate_with_prefix(batch, model),
+    )
+    entries = iter(dataloader)
 
-        return {}
+    model = ReflectiveCore(
+        vocab_size=len(action_space),
+        state_size=data_info["max_steps"] + 2,
+    )
 
-    entries = iter(IterableDataset(data_seed, data_stub, chance=0.5))
-    for i in range(2 * len(data_seed)):
-        print(next(entries))
+    model.load_state_dict(
+        torch.load(os.path.join(save_data, "model.pt"), map_location=device)
+    )
+    print(f"Load model: {os.path.join(save_data, 'model.pt')}")
+
+    model.train()
+
+    with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
+        for step in range(total):
+            batch = next(entries)
+
+            print(f"Load batch: {batch}")
+
+            progress.update(1)
 
 
 def main():
@@ -610,9 +656,9 @@ def main():
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--num-samples", type=int)
     parser.add_argument("--save-sample")
-    parser.add_argument("--save-image")
-    parser.add_argument("--save-model")
     parser.add_argument("--save-data")
+    parser.add_argument("--save-image")
+    parser.add_argument("--device")
     # parser.add_argument("--randomize", type=bool, default=False)
 
     args = parser.parse_args()
@@ -713,6 +759,7 @@ def main():
         train_continue(
             save_data=args.save_data,
             save_image=args.save_image,
+            device=args.device,
         )
 
     else:
