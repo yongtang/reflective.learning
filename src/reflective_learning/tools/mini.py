@@ -559,7 +559,7 @@ def f_data(data, save_image, context_encoder):
     return data
 
 
-def train_continue(save_data, save_image, batch_size, device):
+def train_continue(save_data, save_image, batch_size, batch_total, device):
     with open(os.path.join(save_data, "info.json"), "r") as f:
         data_info = json.loads(f.read())
     print(f"Load info: {json.dumps(data_info)}")
@@ -602,8 +602,8 @@ def train_continue(save_data, save_image, batch_size, device):
     )
     entries = iter(dataloader)
 
-    with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
-        for step in range(total):
+    with tqdm(total=batch_total, desc="Training", leave=True, ncols=100) as progress:
+        for step in range(batch_total):
             batch = next(entries)
 
             print(f"Load batch: {batch}")
@@ -658,6 +658,7 @@ def main():
     parser.add_argument("--save-sample")
     parser.add_argument("--save-data")
     parser.add_argument("--save-image")
+    parser.add_argument("--batch-total", type=int)
     parser.add_argument("--device")
     # parser.add_argument("--randomize", type=bool, default=False)
 
@@ -754,12 +755,15 @@ def main():
         )
 
     elif args.mode == "continue":
-        assert args.save_data and args.save_image and args.batch_size
+        assert (
+            args.save_data and args.save_image and args.batch_total and args.batch_size
+        )
 
         train_continue(
             save_data=args.save_data,
             save_image=args.save_image,
             batch_size=args.batch_size,
+            batch_total=args.batch_total,
             device=args.device,
         )
 
