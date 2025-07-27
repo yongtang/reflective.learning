@@ -586,7 +586,7 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
     model = ReflectiveCore(
         vocab_size=len(action_space),
         state_size=data_info["max_steps"] + 2,
-    )
+    ).to(device)
 
     model.load_state_dict(
         torch.load(os.path.join(save_data, "model.pt"), map_location=device)
