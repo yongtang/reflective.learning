@@ -574,6 +574,9 @@ def f_data(data, save_image, context_encoder, model):
 
 
 def train_continue(save_data, save_image, batch_size, batch_total, device):
+
+    lr = 1e-3
+
     with open(os.path.join(save_data, "info.json"), "r") as f:
         data_info = json.loads(f.read())
     print(f"Load info: {json.dumps(data_info)}")
@@ -618,12 +621,29 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
     )
     entries = iter(dataloader)
 
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
     model.train()
     with tqdm(total=batch_total, desc="Training", leave=True, ncols=100) as progress:
+        total_loss = 0.0
         for step in range(batch_total):
             batch = next(entries)
 
-            print(f"Load batch: {batch}")
+            embed, mask = batch["embed"], batch["mask"]
+            token_target = batch["token_target"]
+            state_target = batch["state_target"]
+
+            logits = model.call(embed, mask=mask)
+            logits = logits[:, -token_target.size(1) - 1 : -1]
+
+            loss = model.loss(logits, token_target, state_target)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            pbar.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
             progress.update(1)
 
