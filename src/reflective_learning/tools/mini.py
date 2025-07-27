@@ -643,7 +643,7 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
             optimizer.step()
 
             total_loss += loss.item()
-            pbar.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
+            progress.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
 
             progress.update(1)
 
