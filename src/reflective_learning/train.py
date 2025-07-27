@@ -1,11 +1,8 @@
 import os
 
 import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from reflective_learning.dataset import ReflectiveDataset
 from reflective_learning.model import ReflectiveCore
 
 
@@ -87,105 +84,81 @@ def collate_with_prefix(batch, model):
 
 
 def train(
-    json_paths,
-    vocab_size,
-    state_size,
-    save_path,
-    max_seq_len,
-    epochs=1,
-    batch_size=2,
-    lr=1e-3,
-    device=None,
-    d_model=768,
-    nhead=12,
-    dim_feedforward=3072,
-    dropout=0.1,
-    num_layers=12,
+    model: ReflectiveCore,
+    dataloader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    total: int,
+    save_data: str,
+    save_interval: int,
+    callback_func: Callable[[ReflectiveCore, int], None],
+    callback_interval: int,
+    device: Optional[torch.device] = None,
 ):
     """
-    Trains a ReflectiveCore model on the provided dataset.
+    Trains the model using a streaming dataloader and saves periodic checkpoints.
+
+    Args:
+        model: The ReflectiveCore model to train.
+        dataloader: A torch DataLoader yielding training batches.
+        optimizer: Optimizer for updating model parameters.
+        total: Total number of training samples to process.
+        save_data: Directory where model checkpoints will be saved.
+        save_interval: Save model every N samples.
+        callback_func: A function called periodically during training (e.g., for inference).
+        callback_interval: Interval (in samples) at which to invoke the callback.
+        device: Optional device override (defaults to CUDA if available).
     """
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
-    print("🚀 Starting training...")
-    print(f"📁 Input files: {json_paths}")
-    print(
-        f"📐 Vocab size: {vocab_size}, State size: {state_size}, Max seq len: {max_seq_len}"
-    )
-    print(
-        f"🧠 Model: d_model={d_model}, layers={num_layers}, heads={nhead}, ff={dim_feedforward}"
-    )
-    print(f"⚙️ Epochs: {epochs}, Batch size: {batch_size}, LR: {lr}")
-    print(f"💻 Device: {device}")
-    print(f"💾 Will save model to: {save_path}")
-    print()
+    os.makedirs(save_data, exist_ok=True)
+    saved = []
 
-    dataset = ReflectiveDataset(json_paths, max_seq_len=max_seq_len, d_model=d_model)
+    count = 0
+    data_iter = iter(dataloader)
 
-    model = ReflectiveCore(
-        vocab_size=vocab_size,
-        state_size=state_size,
-        max_seq_len=max_seq_len,
-        d_model=d_model,
-        nhead=nhead,
-        dim_feedforward=dim_feedforward,
-        dropout=dropout,
-        num_layers=num_layers,
-    ).to(device)
+    with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
+        while count < total:
+            try:
+                batch = next(data_iter)
+            except StopIteration:
+                data_iter = iter(dataloader)
+                batch = next(data_iter)
 
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        collate_fn=lambda batch: collate_with_prefix(batch, model),
-    )
+            model.train()
+            embed = batch["embed"].to(device)
+            mask = batch["mask"].to(device)
+            token_target = batch["token_target"].to(device)
+            state_target = batch["state_target"].to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+            logits = model.call(embed, mask=mask)
+            logits = logits[:, -token_target.size(1) - 1 : -1]
 
-    # Track checkpoints
-    checkpoint_dir = os.path.join(os.path.dirname(save_path), "checkpoints")
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    recent_checkpoints = []
+            loss = model.loss(logits, token_target, state_target)
 
-    model.train()
-    for epoch in range(epochs):
-        total_loss = 0.0
-        num_batches = len(dataloader)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        print(f"\n🌀 Epoch {epoch + 1}/{epochs}")
+            batch_size = embed.size(0)
+            count += batch_size
+            progress.update(batch_size)
+            progress.set_postfix(loss=f"{loss.item():.4f}", samples=count)
 
-        with tqdm(dataloader, desc="Training", leave=True, ncols=100) as pbar:
-            for step, batch in enumerate(pbar):
-                embed = batch["embed"]
-                mask = batch["mask"]
-                token_target = batch["token_target"]
-                state_target = batch["state_target"]
+            # Save model periodically
+            if count % save_interval < batch_size:
+                filename = os.path.join(save_data, f"model_{count}.pt")
+                torch.save(model.state_dict(), filename)
+                saved.append(filename)
+                if len(saved) > 3:
+                    oldest = saved.pop(0)
+                    if os.path.exists(oldest):
+                        os.remove(oldest)
 
-                logits = model.call(embed, mask=mask)
-                logits = logits[:, -token_target.size(1) - 1 : -1]
+            # Run callback periodically
+            if callback_func and count % callback_interval < batch_size:
+                callback_func(model, count)
 
-                loss = model.loss(logits, token_target, state_target)
-
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                total_loss += loss.item()
-                pbar.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
-
-        avg_loss = total_loss / num_batches
-        print(f"📉 Epoch {epoch + 1} complete. Avg loss: {avg_loss:.4f}")
-
-        # Save checkpoint and keep only the last 3
-        checkpoint_path = os.path.join(checkpoint_dir, f"epoch_{epoch+1:03d}.pt")
-        torch.save(model.state_dict(), checkpoint_path)
-        print(f"💾 Checkpoint saved to: {checkpoint_path}")
-        recent_checkpoints.append(checkpoint_path)
-        if len(recent_checkpoints) > 3:
-            oldest = recent_checkpoints.pop(0)
-            if os.path.exists(oldest):
-                os.remove(oldest)
-
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    torch.save(model.state_dict(), save_path)
-    print(f"✅ Model saved to: {save_path}")
+    # Final model save
+    final_filename = os.path.join(save_data, "model.pt")
+    torch.save(model.state_dict(), final_filename)

@@ -8,27 +8,23 @@ class ReflectiveCore(nn.Module):
         self,
         vocab_size: int,
         state_size: int,
-        d_model: int = 768,
-        nhead: int = 12,
-        dim_feedforward: int = 3072,
-        dropout: float = 0.1,
-        num_layers: int = 12,
-        max_seq_len: int = 1024,
+        max_seq_len: int,
+        max_prefix_len: int,
+        decoder: nn.TransformerDecoder,
     ):
         """
         Initializes the ReflectiveCore Transformer model.
 
         Args:
-            vocab_size (int): Size of the vocabulary (number of tokens).
+            vocab_size (int): Size of the vocabulary (number of token classes).
             state_size (int): Number of mutually exclusive state classes.
-            d_model (int): Transformer embedding dimension.
-            nhead (int): Number of attention heads.
-            dim_feedforward (int): Dimension of the feedforward network.
-            dropout (float): Dropout probability.
-            num_layers (int): Number of transformer decoder layers.
-            max_seq_len (int): Maximum sequence length for positional embeddings.
+            max_seq_len (int): Maximum sequence length.
+            max_prefix_len (int): Maximum prefix length.
+            decoder (nn.TransformerDecoder): Transformer decoder.
         """
         super().__init__()
+
+        d_model = decoder.layers[0].linear1.in_features
 
         self.vocab_size = vocab_size
         self.state_size = state_size
@@ -36,16 +32,9 @@ class ReflectiveCore(nn.Module):
 
         self.input_linear = nn.Linear(vocab_size * state_size, d_model)
         self.output_linear = nn.Linear(d_model, vocab_size * state_size)
-        self.pos_embedding = nn.Embedding(max_seq_len + 512, d_model)
+        self.pos_embedding = nn.Embedding(max_seq_len + max_prefix_len, d_model)
 
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=d_model,
-            nhead=nhead,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+        self.decoder = decoder
 
     def forward(
         self,
@@ -64,7 +53,7 @@ class ReflectiveCore(nn.Module):
             mask (Tensor, optional): [L, L] or [B, L, L] causal attention mask.
 
         Returns:
-            Tensor: [B, T, vocab_size, state_size] output logits.
+            Tensor: [B, T, vocab_size, state_size] output logits (excludes prefix).
         """
         assert prefix is not None, "prefix is required"
         B, T = token_ids.shape
@@ -78,7 +67,8 @@ class ReflectiveCore(nn.Module):
         x = self.input_linear(x)  # [B, T, d_model]
 
         x = torch.cat([prefix, x], dim=1)  # [B, C+T, d_model]
-        return self.call(x, mask=mask)
+        logits = self.call(x, mask=mask)  # [B, C+T, vocab_size, state_size]
+        return logits[:, prefix.shape[1] :]  # Return only logits for token positions
 
     def call(self, embed: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         """
