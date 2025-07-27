@@ -28,14 +28,14 @@ def test_reflective_transformer_forward_and_loss():
         decoder=decoder,
     )
 
-    token_ids = torch.randint(0, vocab_size, (batch_size, max_seq_len))
-    state_ids = torch.randint(0, state_size, (batch_size, max_seq_len))
+    token = torch.randint(0, vocab_size, (batch_size, max_seq_len))  # [B, T]
+    state = torch.randint(0, state_size, (batch_size,))  # [B]
 
     d_model = decoder.layers[0].linear1.in_features
-    dummy_prefix = torch.zeros(batch_size, max_prefix_len, d_model)
+    prefix = torch.zeros(batch_size, max_prefix_len, d_model)  # [B, C, d_model]
 
-    logits = model(token_ids, state_ids, prefix=dummy_prefix)
+    logits = model(token, state, prefix=prefix)
     assert logits.shape == (batch_size, max_seq_len, vocab_size, state_size)
 
-    loss = model.loss(logits, token_ids, state_ids)
+    loss = model.loss(logits, token, state)
     assert loss.item() > 0

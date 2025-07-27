@@ -126,6 +126,6 @@ class ReflectiveCore(nn.Module):
         state_expanded = state.unsqueeze(1).expand(-1, T)  # [B, T]
         target = state_expanded * V + token  # [B, T] as flat index
 
-        logits_flat = logits.view(B * T, V * S)
-        target_flat = target.view(-1)
+        logits_flat = logits.reshape(B * T, V * S)
+        target_flat = target.reshape(-1)
         return F.cross_entropy(logits_flat, target_flat)
