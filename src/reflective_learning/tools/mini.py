@@ -621,7 +621,7 @@ def train_continue(save_data, save_image, batch_size, batch_total, device):
     )
     entries = iter(dataloader)
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     model.train()
     with tqdm(total=batch_total, desc="Training", leave=True, ncols=100) as progress:
