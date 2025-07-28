@@ -2,6 +2,7 @@ import functools
 import json
 
 import PIL.Image
+import torch
 from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
 
