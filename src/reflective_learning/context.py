@@ -1,5 +1,4 @@
 import functools
-import json
 
 import PIL.Image
 import torch
@@ -24,8 +23,6 @@ class ContextEncoder:
 
     @classmethod
     def from_pretrained(cls, info, device="cpu"):
-        versions = json.load(f)
-
         text_cfg = info["text"]
         image_cfg = info["image"]
 
