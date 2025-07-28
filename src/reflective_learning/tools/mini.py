@@ -85,6 +85,33 @@ def f_variants(actions, max_extra_steps):
     return variants
 
 
+def f_state(entry, env_size, max_steps):
+    env = EmptyEnv(
+        goal=entry["goal"],
+        randomize=False,
+        size=env_size,
+        agent_start_pos=np.array(entry["start"]),
+        agent_start_dir=f_string_to_facing(entry["facing"]),
+        render_mode="ansi",
+    )
+    env.reset()
+
+    step_count = 0
+    for token in entry["token"]:
+        action = f_action(token)
+        _, reward, terminated, truncated, _ = env.step(action)
+        step_count += 1
+        if terminated or truncated:
+            break
+
+    env.close()
+
+    if reward > 0 and step_count <= max_steps:
+        return str(step_count)
+    else:
+        return str(max_steps + 1)
+
+
 class EmptyEnv(minigrid.envs.EmptyEnv):
     def __init__(self, goal=None, randomize=False, **kwargs):
         self.goal = goal
