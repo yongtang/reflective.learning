@@ -335,14 +335,30 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
     if len(data_seed) == 0:
         with open(os.path.join(save_data, "seed.json"), "r") as f:
             for i, line in enumerate(f):
-                data_seed.append(f_data(json.loads(line), save_image, encoder, model))
+                data_seed.append(
+                    f_data(
+                        json.loads(line),
+                        save_image,
+                        encoder,
+                        model,
+                        info["core"]["max_steps"],
+                    )
+                )
     print(f"Load seed: {len(data_seed)}")
 
     data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
     if len(data_stub) == 0:
         with open(os.path.join(save_data, "stub.json"), "r") as f:
             for i, line in enumerate(f):
-                data_stub.append(f_data(json.loads(line), save_image, encoder, model))
+                data_stub.append(
+                    f_data(
+                        json.loads(line),
+                        save_image,
+                        encoder,
+                        model,
+                        info["core"]["max_steps"],
+                    )
+                )
     print(f"Load stub: {len(data_stub)}")
 
     dataset = IterableDataset(data_seed, data_stub, chance=0.5)
