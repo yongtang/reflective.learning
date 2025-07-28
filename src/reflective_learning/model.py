@@ -136,22 +136,28 @@ class ReflectiveCore(nn.Module):
 
     def collate(self, batch):
         """
-        Collate function for variable-length prefix support.
+        Collate function for training the ReflectiveCore model using next-token prediction.
 
-        Input format (per example):
-            {
-                "token": LongTensor [T],       # token sequence (no prefix)
-                "state": LongTensor [1],       # scalar state per sequence
-                "prefix": FloatTensor [C, d_model],  # prefix embedding
-            }
+        Each example in the input batch consists of:
+            - token: LongTensor [T], where T ≥ 2
+            - state: LongTensor [1], single state label
+            - prefix: FloatTensor [C, d_model], real-valued context embedding
 
-        Output format (batched):
-            {
-                "mask":  FloatTensor [B, L, L],        # causal mask
-                "embed": FloatTensor [B, L, d_model],  # model input (prefix + projected tokens)
-                "token": LongTensor [B, T-1],          # token prediction target
-                "state": LongTensor [B],               # per-sequence state
-            }
+        This function produces a batch suitable for training a decoder-only model
+        to predict the final token in the sequence (token[T-1]) using the following input:
+            - prefix embedding [C, d_model]
+            - projected input tokens token[0:T-1], each expanded with one-hot token × state,
+              linearly projected to [d_model]
+
+        The resulting input embedding has shape [L, d_model] where L = C + (T-1).
+        A causal attention mask of shape [L, L] is constructed to prevent attending to future positions.
+
+        Returns:
+            A dict with the following keys:
+                - "mask":  FloatTensor [B, L, L] — causal attention mask (float, with -inf for masked positions)
+                - "embed": FloatTensor [B, L, d_model] — full input embeddings (prefix + token projections)
+                - "token": LongTensor [B] — final token in each sequence (prediction target)
+                - "state": LongTensor [B] — state label per example (shared across sequence)
         """
         device = next(self.parameters()).device
         d_model = self.d_model
@@ -159,8 +165,7 @@ class ReflectiveCore(nn.Module):
 
         masks, embeds = [], []
         token_targets, state_targets = [], []
-        max_embed_len = 0  # max length after prefix + token projection
-        max_token_len = 0  # max length of token prediction target (T-1)
+        max_embed_len = 0
 
         for entry in batch:
             token = entry["token"].to(device)  # [T]
@@ -168,17 +173,30 @@ class ReflectiveCore(nn.Module):
             prefix = entry["prefix"].to(device)  # [C, d_model]
 
             T = token.size(0)
-            x = torch.zeros((T, V, S), device=device)
-            x.scatter_(1, token.view(T, 1, 1), 1.0)
-            x.scatter_(2, state.view(T, 1, 1).expand(T, 1, 1), 1.0)
-            x = x.view(T, V * S)
-            projected = self.input_linear(x)  # [T, d_model]
+            assert (
+                T >= 1
+            ), "Token sequence must have at least 1 token (to predict one step)"
 
-            embed = torch.cat([prefix, projected], dim=0)  # [L, d_model]
-            embeds.append(embed)
-            L = embed.size(0)
+            input_tokens = token[:-1]  # [T-1]
+            target_token = token[-1]  # scalar
+
+            # Create one-hot joint token-state representation
+            x = torch.zeros((T - 1, V, S), device=device)
+            x.scatter_(1, input_tokens.view(-1, 1, 1), 1.0)
+            x.scatter_(2, state.view(1, 1, 1).expand(T - 1, 1, 1), 1.0)
+            x = x.view(T - 1, V * S)
+            projected = self.input_linear(x)  # [T-1, d_model]
+
+            # Combine with prefix
+            full_embed = torch.cat([prefix, projected], dim=0)  # [L, d_model]
+            embeds.append(full_embed)
+            token_targets.append(target_token.view(()))
+            state_targets.append(state.view(()))
+
+            L = full_embed.size(0)
             max_embed_len = max(max_embed_len, L)
 
+            # Construct causal attention mask for [L, L]
             causal_mask = torch.triu(
                 torch.ones((L, L), device=device), diagonal=1
             ).bool()
@@ -186,30 +204,20 @@ class ReflectiveCore(nn.Module):
             mask.masked_fill_(causal_mask, float("-inf"))
             masks.append(mask)
 
-            token_targets.append(token[1:])  # [T-1]
-            state_targets.append(state.view(()))  # []
-
-            max_token_len = max(max_token_len, T - 1)
-
-        B = len(batch)
+        B = len(embeds)
         padded_mask = torch.full(
             (B, max_embed_len, max_embed_len), float("-inf"), device=device
         )
         padded_embed = torch.zeros((B, max_embed_len, d_model), device=device)
-        padded_tokens = torch.zeros((B, max_token_len), dtype=torch.long, device=device)
-        padded_states = torch.stack(state_targets, dim=0)  # [B]
 
         for i in range(B):
             L = embeds[i].size(0)
             padded_embed[i, :L] = embeds[i]
             padded_mask[i, :L, :L] = masks[i]
 
-            T1 = token_targets[i].size(0)
-            padded_tokens[i, :T1] = token_targets[i]
-
         return {
             "mask": padded_mask,  # [B, L, L]
             "embed": padded_embed,  # [B, L, d_model]
-            "token": padded_tokens,  # [B, T-1]
-            "state": padded_states,  # [B]
+            "token": torch.stack(token_targets),  # [B]
+            "state": torch.stack(state_targets),  # [B]
         }
