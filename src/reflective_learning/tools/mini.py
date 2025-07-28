@@ -201,13 +201,21 @@ def train_initial(save_sample, max_steps, save_data):
     unique_string = next(iter(unique_string))
     env_size = int(unique_string)
 
-    data_info = json.dumps(
-        {
-            "env_size": env_size,
-            "max_steps": max_steps,
-            "randomize": randomize,
-        }
-    )
+    info = {
+        "env_size": env_size,
+        "max_steps": max_steps,
+        "randomize": randomize,
+        "layer": {
+            "d_model": 768,
+            "nhead": 12,
+            "dim_feedforward": 3072,
+            "dropout": 0.1,
+        },
+        "decoder": {
+            "num_layers": 12,
+        },
+    }
+    data_info = json.dumps(info)
 
     def f_seed(sample):
         seed = {
@@ -224,6 +232,23 @@ def train_initial(save_sample, max_steps, save_data):
 
     data_seed = "\n".join(set(f_seed(sample) for sample in data_sample)) + "\n"
 
+    decoder = torch.nn.TransformerDecoder(
+        torch.nn.TransformerDecoderLayer(
+            batch_first=True,
+            **info["layer"],
+        ),
+        **info["decoder"],
+    )
+
+    model = ReflectiveCore(
+        vocab_size=len(action_space),
+        state_size=max_steps + 2,
+        max_seq_len=max_steps + 2,
+        max_prefix_len=512,
+        decoder=decoder,
+    )
+    torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
+
     os.makedirs(save_data, exist_ok=True)
     with open(os.path.join(save_data, "info.json"), "w") as f:
         f.write(data_info)
@@ -231,12 +256,6 @@ def train_initial(save_sample, max_steps, save_data):
         f.write(data_seed)
     with open(os.path.join(save_data, "stub.json"), "w") as f:
         pass
-
-    model = ReflectiveCore(
-        vocab_size=len(action_space),
-        state_size=max_steps + 2,
-    )
-    torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
 
 
 def f_data(data, save_image, context_encoder, model):
