@@ -391,13 +391,9 @@ def main():
     print(f"args: {vars(args)}")
 
     if args.mode == "sample":
-        assert (
-            args.env_size
-            and args.max_steps
-            and args.num_samples
-            and args.save_sample
-            and args.save_image
-        )
+        required = ["env_size", "max_steps", "num_samples", "save_sample", "save_image"]
+        required = [name for name in required if not getattr(args, name)]
+        assert not required, f"Missing required arguments: {', '.join(required)}"
 
         train_sample(
             env_size=args.env_size,
@@ -409,7 +405,9 @@ def main():
         )
 
     elif args.mode == "initial":
-        assert args.save_sample and args.max_steps and args.save_data
+        required = ["save_sample", "max_steps", "save_data"]
+        required = [name for name in required if not getattr(args, name)]
+        assert not required, f"Missing required arguments: {', '.join(required)}"
 
         train_initial(
             save_sample=args.save_sample,
