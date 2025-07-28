@@ -341,7 +341,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
                         save_image,
                         encoder,
                         model,
-                        info["core"]["max_steps"],
+                        info["core"]["max_seq_len"],
                     )
                 )
     print(f"Load seed: {len(data_seed)}")
@@ -356,7 +356,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
                         save_image,
                         encoder,
                         model,
-                        info["core"]["max_steps"],
+                        info["core"]["max_seq_len"],
                     )
                 )
     print(f"Load stub: {len(data_stub)}")
