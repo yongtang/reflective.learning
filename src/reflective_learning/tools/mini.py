@@ -214,6 +214,12 @@ def train_initial(save_sample, max_steps, save_data):
         "decoder": {
             "num_layers": 12,
         },
+        "core": {
+            "vocab_size": len(action_space),
+            "state_size": max_steps + 2,
+            "max_seq_len": max_steps + 2,
+            "max_prefix_len": 512,
+        },
     }
     data_info = json.dumps(info)
 
@@ -241,10 +247,7 @@ def train_initial(save_sample, max_steps, save_data):
     )
 
     model = ReflectiveCore(
-        vocab_size=len(action_space),
-        state_size=max_steps + 2,
-        max_seq_len=max_steps + 2,
-        max_prefix_len=512,
+        **info["core"],
         decoder=decoder,
     )
     torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
@@ -286,21 +289,27 @@ def f_data(data, save_image, context_encoder, model):
     }
 
 
-def train_continue(
-    save_data, save_image, batch_size, batch_total, save_interval, device
-):
+def train_continue(save_data, save_image, total, batch_size, save_interval, device):
 
     lr = 1e-3
 
     with open(os.path.join(save_data, "info.json"), "r") as f:
-        data_info = json.loads(f.read())
-    print(f"Load info: {json.dumps(data_info)}")
+        info = json.loads(f.read())
+    print(f"Load info: {json.dumps(info)}")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
+    decoder = torch.nn.TransformerDecoder(
+        torch.nn.TransformerDecoderLayer(
+            batch_first=True,
+            **info["layer"],
+        ),
+        **info["decoder"],
+    )
+
     model = ReflectiveCore(
-        vocab_size=len(action_space),
-        state_size=data_info["max_steps"] + 2,
+        **info["core"],
+        decoder=decoder,
     ).to(device)
 
     model.load_state_dict(
@@ -400,7 +409,8 @@ def main():
     parser.add_argument("--save-sample")
     parser.add_argument("--save-data")
     parser.add_argument("--save-image")
-    parser.add_argument("--batch-total", type=int)
+    parser.add_argument("--total", type=int)
+    parser.add_argument("--batch-size", type=int)
     parser.add_argument("--save-interval", type=int)
     parser.add_argument("--device")
     parser.add_argument("--randomize", type=bool, default=True)
@@ -435,19 +445,15 @@ def main():
         )
 
     elif args.mode == "continue":
-        assert (
-            args.save_data
-            and args.save_image
-            and args.batch_total
-            and args.batch_size
-            and args.save_interval
-        )
+        required = ["save_data", "save_image", "total", "batch_size", "save_interval"]
+        required = [name for name in required if not getattr(args, name)]
+        assert not required, f"Missing required arguments: {', '.join(required)}"
 
         train_continue(
             save_data=args.save_data,
             save_image=args.save_image,
+            total=args.total,
             batch_size=args.batch_size,
-            batch_total=args.batch_total,
             save_interval=args.save_interval,
             device=args.device,
         )
