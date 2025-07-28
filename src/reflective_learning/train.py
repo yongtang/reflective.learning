@@ -37,33 +37,35 @@ def train(
 
     os.makedirs(save_data, exist_ok=True)
     saved = []
-
     count = 0
 
     with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
         for batch in dataloader:
             model.train()
-            mask = batch["mask"].to(device)
-            embed = batch["embed"].to(device)
-            token_target = batch["token_target"].to(device)
-            state_target = batch["state_target"].to(device)
 
-            logits = model.call(embed, mask=mask)
-            logits = logits[:, -token_target.size(1) - 1 : -1]
+            # Move batch to device
+            mask = batch["mask"].to(device)  # [B, L, L]
+            embed = batch["embed"].to(device)  # [B, L, d_model]
+            token_target = batch["token"].to(device)  # [B] — one token per example
+            state_target = batch["state"].to(device)  # [B]
 
+            # Forward pass (model returns logits at final position)
+            logits = model.call(embed, mask=mask)  # [B, V, S]
             loss = model.loss(logits, token_target, state_target)
             loss_value = loss.item()
 
+            # Backpropagation
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
+            # Progress tracking
             batch_size = embed.size(0)
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix(loss=f"{loss_value:.4f}", samples=count)
 
-            # Save model periodically
+            # Save checkpoint
             if count % save_interval < batch_size:
                 filename = os.path.join(save_data, f"model_{count}.pt")
                 torch.save(model.state_dict(), filename)
@@ -74,14 +76,14 @@ def train(
                     if os.path.exists(oldest):
                         os.remove(oldest)
 
-            # Run callback periodically
+            # Run callback
             if callback_func and count % callback_interval < batch_size:
                 callback_func(model, count)
 
             if count >= total:
                 break
 
-    # Final model save
+    # Final save
     final_filename = os.path.join(save_data, "model.pt")
     torch.save(model.state_dict(), final_filename)
     tqdm.write(f"[Final Save] Saved to {final_filename}")

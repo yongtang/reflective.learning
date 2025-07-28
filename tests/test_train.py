@@ -1,4 +1,5 @@
 import torch
+import os
 import tempfile
 import shutil
 from reflective_learning.model import ReflectiveCore
@@ -25,7 +26,12 @@ class DummyDataset(torch.utils.data.Dataset):
 
 def test_train_sanity():
     decoder = torch.nn.TransformerDecoder(
-        torch.nn.TransformerDecoderLayer(d_model=16, nhead=2), num_layers=1
+        torch.nn.TransformerDecoderLayer(
+            d_model=16,
+            nhead=2,
+            batch_first=True,
+        ),
+        num_layers=1,
     )
     model = ReflectiveCore(
         vocab_size=10,
@@ -61,7 +67,12 @@ def test_train_sanity():
 
 def test_checkpoint_rotation():
     decoder = torch.nn.TransformerDecoder(
-        torch.nn.TransformerDecoderLayer(d_model=16, nhead=2), num_layers=1
+        torch.nn.TransformerDecoderLayer(
+            d_model=16,
+            nhead=2,
+            batch_first=True,
+        ),
+        num_layers=1,
     )
     model = ReflectiveCore(
         vocab_size=10,
@@ -108,7 +119,12 @@ def test_checkpoint_rotation():
 
 def test_callback_invoked():
     decoder = torch.nn.TransformerDecoder(
-        torch.nn.TransformerDecoderLayer(d_model=16, nhead=2), num_layers=1
+        torch.nn.TransformerDecoderLayer(
+            d_model=16,
+            nhead=2,
+            batch_first=True,
+        ),
+        num_layers=1,
     )
     model = ReflectiveCore(
         vocab_size=10,

@@ -80,34 +80,28 @@ class ReflectiveCore(nn.Module):
     def call(self, embed: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
         """
         Forward pass for precomputed embeddings.
-
         Args:
-            embed: [B, L, d_model] real-valued embeddings (prefix + tokens).
-            mask: Optional [B, L, L] attention mask.
-
+            embed: [B, L, d_model]
+            mask:  [B, L, L] causal attention mask (float mask with -inf or 0)
         Returns:
-            [B, vocab_size, state_size] logit at the final position.
+            [B, vocab_size, state_size] logit at final position
         """
         assert embed is not None, "embed (with prefix) is required"
         B, L, _ = embed.shape
 
-        # Add positional embeddings
-        pos = torch.arange(L, device=embed.device).unsqueeze(0).expand(B, L)  # [B, L]
-        x = embed + self.pos_embedding(pos)  # [B, L, d_model]
-
-        x = self.decoder(x, x, tgt_mask=mask)  # [B, L, d_model]
-        logit = self.output_linear(x).view(
-            B, L, self.vocab_size, self.state_size
-        )  # [B, L, V, S]
-
         if mask is not None:
-            # Determine the last non-masked position per sequence
-            is_masked = mask[:, -1, :] == float("-inf")  # [B, L]
-            lengths = (~is_masked).sum(dim=1)  # [B], number of valid positions
-            last_idx = lengths - 1  # [B]
-            return logit[torch.arange(B), last_idx]  # [B, V, S]
-        else:
-            return logit[:, -1]  # [B, V, S]
+            # Expand [B, L, L] → [B * nhead, L, L] as required by PyTorch
+            nhead = self.decoder.layers[0].self_attn.num_heads
+            mask = mask.unsqueeze(1).expand(B, nhead, L, L).reshape(B * nhead, L, L)
+
+        # Add position embeddings
+        pos = torch.arange(L, device=embed.device).unsqueeze(0).expand(B, L)
+        x = embed + self.pos_embedding(pos)
+
+        x = self.decoder(x, x, tgt_mask=mask)  # standard decoder call
+        logit = self.output_linear(x).view(B, L, self.vocab_size, self.state_size)
+
+        return logit[:, -1]  # always return final position
 
     def loss(
         self,
