@@ -355,7 +355,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        collate_fn=lambda batch: collate_with_prefix(batch, model),
+        collate_fn=model.collate,
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
