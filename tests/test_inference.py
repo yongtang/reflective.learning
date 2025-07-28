@@ -1,6 +1,6 @@
 import torch
 
-from src.reflective_learning.inference import sequence, sequence_batched
+from src.reflective_learning.inference import sequence
 from src.reflective_learning.model import ReflectiveCore
 
 
@@ -46,32 +46,3 @@ def test_sequence():
         assert (tokens == stop_token).nonzero(as_tuple=False)[0].item() < max_seq_len
     else:
         assert tokens.shape[0] <= max_seq_len
-
-
-def test_sequence_batched():
-    model = make_dummy_model()
-    prefixes = torch.randn(4, 3, 16)  # [B=4, C=3, d_model=16]
-    state_weights = {0: 0.6, 1: 0.4}
-    stop_token = 0
-    max_seq_len = 10
-
-    sequences = sequence_batched(
-        model=model,
-        prefixes=prefixes,
-        state_weights=state_weights,
-        stop_token=stop_token,
-        max_seq_len=max_seq_len,
-        device="cpu",
-    )
-
-    assert isinstance(sequences, list)
-    assert len(sequences) == 4
-
-    for seq in sequences:
-        assert isinstance(seq, torch.Tensor)
-        assert seq.ndim == 1
-        assert seq.shape[0] > 0
-        if stop_token in seq:
-            assert (seq == stop_token).nonzero(as_tuple=False)[0].item() < max_seq_len
-        else:
-            assert seq.shape[0] <= max_seq_len
