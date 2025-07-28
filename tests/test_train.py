@@ -53,7 +53,7 @@ def test_train_sanity():
     try:
         train(
             model=model,
-            dataloader=loader,
+            loader=loader,
             optimizer=optimizer,
             total=20,
             save_data=tmpdir,
@@ -104,7 +104,7 @@ def test_checkpoint_rotation():
     try:
         train(
             model=model,
-            dataloader=loader,
+            loader=loader,
             optimizer=optimizer,
             total=40,
             save_data=tmpdir,
@@ -161,7 +161,7 @@ def test_callback_invoked():
     try:
         train(
             model=model,
-            dataloader=loader,
+            loader=loader,
             optimizer=optimizer,
             total=10,
             save_data=tmpdir,

@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from reflective_learning.context import ContextEncoder
 from reflective_learning.model import ReflectiveCore
+from reflective_learning.train import train
 
 action_space = ["left", "right", "forward"]
 facing_space = ["right", "down", "left", "up"]
@@ -351,55 +352,25 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
     print(f"Load stub: {len(data_stub)}")
 
     dataset = IterableDataset(data_seed, data_stub, chance=0.5)
-    dataloader = torch.utils.data.DataLoader(
+    loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
         collate_fn=lambda batch: collate_with_prefix(batch, model),
     )
-    entries = iter(dataloader)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
-        interval = []
-        total_loss = 0.0
-        for step in range(batch_total):
-            batch = next(entries)
-
-            model.train()
-
-            embed, mask = batch["embed"], batch["mask"]
-            token_target = batch["token_target"]
-            state_target = batch["state_target"]
-
-            logits = model.call(embed, mask=mask)
-            logits = logits[:, -token_target.size(1) - 1 : -1]
-
-            loss = model.loss(logits, token_target, state_target)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item()
-            progress.set_postfix(loss=f"{total_loss / (step + 1):.4f}")
-
-            progress.update(1)
-
-            model.eval()
-            with torch.no_grad():
-                pass
-
-            if (step + 1) % save_interval == 1:
-                interval.append(os.path.join(save_data, f"model_{step:03d}.pt"))
-                torch.save(model.state_dict(), interval[-1])
-                if len(interval) > 3:
-                    oldest = interval.pop(0)
-                    if os.path.exists(oldest):
-                        os.remove(oldest)
-
-    torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
-    print(f"Save model: {os.path.join(save_data, 'model.pt')}")
+    train(
+        model=model,
+        loader=loader,
+        optimizer=optimizer,
+        total=total,
+        save_data=save_data,
+        save_interval=save_interval,
+        callback_func=None,
+        callback_interval=0,
+        device=data,
+    )
 
 
 def main():

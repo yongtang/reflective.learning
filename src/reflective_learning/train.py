@@ -9,7 +9,7 @@ from reflective_learning.model import ReflectiveCore
 
 def train(
     model: ReflectiveCore,
-    dataloader: torch.utils.data.DataLoader,
+    loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     total: int,
     save_data: str,
@@ -19,11 +19,11 @@ def train(
     device: Optional[torch.device] = None,
 ):
     """
-    Trains the model using a streaming dataloader and saves periodic checkpoints.
+    Trains the model using a streaming loader and saves periodic checkpoints.
 
     Args:
         model: The ReflectiveCore model to train.
-        dataloader: A torch DataLoader yielding training batches.
+        loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
         total: Total number of training samples to process.
         save_data: Directory where model checkpoints will be saved.
@@ -40,7 +40,7 @@ def train(
     count = 0
 
     with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
-        for batch in dataloader:
+        for batch in loader:
             model.train()
 
             # Move batch to device
