@@ -369,7 +369,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
         save_interval=save_interval,
         callback_func=None,
         callback_interval=0,
-        device=data,
+        device=device,
     )
 
 
