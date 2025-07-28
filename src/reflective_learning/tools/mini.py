@@ -10,8 +10,8 @@ import minigrid
 import PIL.Image
 import torch
 from tqdm import tqdm
-from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
+from reflective_learning.context import ContextEncoder
 from reflective_learning.model import ReflectiveCore
 
 action_space = ["left", "right", "forward"]
@@ -82,80 +82,6 @@ def f_variants(actions, max_extra_steps):
         if len(path) == len(actions) + extra:
             variants.append(path)
     return variants
-
-
-class ContextEncoder:
-    def __init__(
-        self, text_model, image_model, tokenizer, image_processor, device="cpu"
-    ):
-        assert text_model is not None, "text_model is required"
-        assert image_model is not None, "image_model is required"
-        assert tokenizer is not None, "tokenizer is required"
-        assert image_processor is not None, "image_processor is required"
-        assert text_model.config.hidden_size == image_model.config.hidden_size
-
-        self.text_model = text_model.to(device)
-        self.image_model = image_model.to(device)
-        self.tokenizer = tokenizer
-        self.image_processor = image_processor
-        self.device = device
-
-    @classmethod
-    def from_pretrained(cls, context_dir, device="cpu"):
-        with open(os.path.join(context_dir, "context_versions.json")) as f:
-            versions = json.load(f)
-
-        text_cfg = versions["pretrained_models"]["gpt2"]
-        image_cfg = versions["pretrained_models"]["vit"]
-
-        text_model = AutoModel.from_pretrained(
-            text_cfg["model"], revision=text_cfg["revision"]
-        )
-        tokenizer = AutoTokenizer.from_pretrained(
-            text_cfg["model"], revision=text_cfg["revision"]
-        )
-        image_model = AutoModel.from_pretrained(
-            image_cfg["model"], revision=image_cfg["revision"]
-        )
-        image_processor = AutoImageProcessor.from_pretrained(
-            image_cfg["model"], revision=image_cfg["revision"], use_fast=True
-        )
-
-        return cls(text_model, image_model, tokenizer, image_processor, device=device)
-
-    @functools.lru_cache(maxsize=1024)
-    def encode_text_embed(self, text: str) -> torch.Tensor:
-        inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
-        input_ids = inputs["input_ids"].to(self.device)
-        with torch.no_grad():
-            output = self.text_model(input_ids=input_ids)
-            return output.last_hidden_state.squeeze(0).detach().cpu()
-
-    @functools.lru_cache(maxsize=1024)
-    def encode_image_embed(self, image_path: str) -> torch.Tensor:
-        image = Image.open(image_path).convert("RGB")
-        pixel_values = self.image_processor(
-            images=image, return_tensors="pt"
-        ).pixel_values.to(self.device)
-        with torch.no_grad():
-            output = self.image_model(pixel_values=pixel_values)
-            return output.last_hidden_state.squeeze(0).detach().cpu()
-
-    def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
-        segments = []
-        break_embed = torch.zeros(
-            (1, self.text_model.config.hidden_size), dtype=torch.float32
-        )
-
-        for t in text:
-            segments.append(self.encode_text_embed(t))
-        segments.append(break_embed.clone())
-
-        for path in image:
-            segments.append(self.encode_image_embed(path))
-        segments.append(break_embed.clone())
-
-        return torch.cat(segments, dim=0)
 
 
 class EmptyEnv(minigrid.envs.EmptyEnv):
@@ -295,6 +221,17 @@ def train_initial(save_sample, max_steps, save_data):
             "max_seq_len": max_steps + 2,
             "max_prefix_len": 512,
         },
+        "context": {
+            "text": {
+                "model": "gpt2",
+                "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+            },
+            "image": {
+                "model": "google/vit-base-patch16-224",
+                "revision": "3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3",
+            },
+            # "transformers": "4.50.0",
+        },
     }
     data_info = json.dumps(info)
 
@@ -325,9 +262,10 @@ def train_initial(save_sample, max_steps, save_data):
         **info["core"],
         decoder=decoder,
     )
-    torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
 
     os.makedirs(save_data, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
+
     with open(os.path.join(save_data, "info.json"), "w") as f:
         f.write(data_info)
     with open(os.path.join(save_data, "seed.json"), "w") as f:
@@ -392,7 +330,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
     )
     print(f"Load model: {os.path.join(save_data, 'model.pt')}")
 
-    context_encoder = ContextEncoder.from_pretrained(save_data, device=device)
+    context_encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
     if len(data_seed) == 0:
