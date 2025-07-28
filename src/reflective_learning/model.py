@@ -170,7 +170,7 @@ class ReflectiveCore(nn.Module):
             T = token.size(0)
             x = torch.zeros((T, V, S), device=device)
             x.scatter_(1, token.view(T, 1, 1), 1.0)
-            x.scatter_(2, state.view(1, 1, 1).expand(T, 1, 1), 1.0)
+            x.scatter_(2, state.view(T, 1, 1).expand(T, 1, 1), 1.0)
             x = x.view(T, V * S)
             projected = self.input_linear(x)  # [T, d_model]
 

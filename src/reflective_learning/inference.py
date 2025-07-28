@@ -66,6 +66,7 @@ def sequence(
     return tokens
 
 
+
 def sequence_batched(
     model,
     state_weights: dict,
@@ -90,61 +91,69 @@ def sequence_batched(
         List[List[int]]: generated token sequences
     """
     model.eval()
-    state_indices = list(state_weights.keys())
-    state_weight_tensor = torch.zeros(model.state_size, device=device)
-    for s, w in state_weights.items():
-        state_weight_tensor[s] = w
+    B, C, d_model = prefixes.shape
+
+    # Prepare state weights as [S] tensor
+    S = model.state_size
+    state_weight_tensor = torch.tensor(
+        [state_weights.get(s, 0.0) for s in range(S)],
+        dtype=torch.float32,
+        device=device,
+    )
     state_weight_tensor /= state_weight_tensor.sum()
 
-    B = prefixes.size(0)
     sequences = [[] for _ in range(B)]
     states = [[] for _ in range(B)]
     finished = [False] * B
 
     with torch.no_grad():
         for _ in range(max_seq_len):
-            active = [i for i, done in enumerate(finished) if not done]
-            if not active:
+            active_indices = [i for i, done in enumerate(finished) if not done]
+            if not active_indices:
                 break
 
-            max_len = max(len(sequences[i]) for i in active)
-            token_tensor = torch.zeros(len(active), max_len, dtype=torch.long)
-            state_tensor = torch.zeros(len(active), max_len, dtype=torch.long)
+            max_len = max(len(sequences[i]) for i in active_indices)
 
-            for i, idx in enumerate(active):
-                token_tensor[i, : len(sequences[idx])] = torch.tensor(
-                    sequences[idx], dtype=torch.long
-                )
-                state_tensor[i, : len(states[idx])] = torch.tensor(
-                    states[idx], dtype=torch.long
-                )
+            # Build padded token/state tensors
+            token_tensor = torch.zeros(len(active_indices), max_len, dtype=torch.long)
+            state_tensor = torch.zeros(len(active_indices), max_len, dtype=torch.long)
+            prefix_tensor = []
+
+            for i, idx in enumerate(active_indices):
+                seq = sequences[idx]
+                st = states[idx]
+                token_tensor[i, : len(seq)] = torch.tensor(seq, dtype=torch.long)
+                state_tensor[i, : len(st)] = torch.tensor(st, dtype=torch.long)
+                prefix_tensor.append(prefixes[idx])
+
+            prefix_tensor = torch.stack(prefix_tensor, dim=0)  # [B_active, C, d_model]
 
             batch = [
                 {
                     "token": token_tensor[i],
                     "state": state_tensor[i],
-                    "prefix": prefixes[idx],
+                    "prefix": prefix_tensor[i],
                 }
-                for i, idx in enumerate(active)
+                for i in range(len(active_indices))
             ]
             batch = model.collate(batch)
+
             logits = model.call(
                 batch["embed"].to(device),
                 batch["mask"].to(device),
-            )  # [B, L, V, S]
-            logits = logits[:, -1]  # [B, V, S]
+            )  # [B_active, V, S]
 
-            for i, global_idx in enumerate(active):
-                prob = (F.softmax(logits[i], dim=0) @ state_weight_tensor).clamp(
-                    min=1e-8
-                )
+            for i, idx in enumerate(active_indices):
+                logit = logits[i]  # [V, S]
+                prob = (F.softmax(logit, dim=0) @ state_weight_tensor).clamp(min=1e-8)
                 prob /= prob.sum()
-
                 next_token = torch.multinomial(prob, num_samples=1).item()
-                sequences[global_idx].append(next_token)
-                states[global_idx].append(state_indices[0])  # fixed per-sequence state
+
+                sequences[idx].append(next_token)
+                states[idx].append(0)  # optional: fix this if true per-seq state is known
 
                 if next_token == stop_token:
-                    finished[global_idx] = True
+                    finished[idx] = True
 
     return sequences
+

@@ -39,16 +39,16 @@ def test_sequence():
         device="cpu",
     )
 
-    assert isinstance(tokens, list)
-    assert all(isinstance(t, int) for t in tokens)
-    assert len(tokens) > 0
+    # Updated assertions for torch.Tensor return type
+    assert isinstance(tokens, torch.Tensor)
+    assert tokens.shape[0] > 0
     if stop_token in tokens:
-        assert tokens.index(stop_token) < max_seq_len
+        assert (tokens == stop_token).nonzero(as_tuple=False)[0].item() < max_seq_len
     else:
-        assert len(tokens) <= max_seq_len
+        assert tokens.shape[0] <= max_seq_len
 
 
-def _test_sequence_batched():
+def test_sequence_batched():
     model = make_dummy_model()
     prefixes = torch.randn(4, 3, 16)  # [B=4, C=3, d_model=16]
     state_weights = {0: 0.6, 1: 0.4}
@@ -66,11 +66,12 @@ def _test_sequence_batched():
 
     assert isinstance(sequences, list)
     assert len(sequences) == 4
+
     for seq in sequences:
-        assert isinstance(seq, list)
-        assert all(isinstance(t, int) for t in seq)
-        assert len(seq) > 0
+        assert isinstance(seq, torch.Tensor)
+        assert seq.ndim == 1
+        assert seq.shape[0] > 0
         if stop_token in seq:
-            assert seq.index(stop_token) < max_seq_len
+            assert (seq == stop_token).nonzero(as_tuple=False)[0].item() < max_seq_len
         else:
-            assert len(seq) <= max_seq_len
+            assert seq.shape[0] <= max_seq_len
