@@ -50,7 +50,7 @@ def train(
             state_target = batch["state"].to(device)  # [B]
 
             # Forward pass (model returns logits at final position)
-            logits = model.call(embed, mask=mask)  # [B, V, S]
+            logits = model.call(mask=mask, embed=embed)  # [B, V, S]
             loss = model.loss(logits, token_target, state_target)
             loss_value = loss.item()
 

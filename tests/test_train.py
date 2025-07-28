@@ -1,7 +1,9 @@
-import torch
 import os
-import tempfile
 import shutil
+import tempfile
+
+import torch
+
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import train
 

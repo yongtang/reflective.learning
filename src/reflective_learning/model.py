@@ -75,14 +75,14 @@ class ReflectiveCore(nn.Module):
         x = self.input_linear(joint_flat)  # [B, T, d_model]
         x = torch.cat([prefix, x], dim=1)  # [B, C+T, d_model]
 
-        return self.call(x, mask=mask)  # [B, V, S]
+        return self.call(mask=mask, embed=x)  # [B, V, S]
 
-    def call(self, embed: torch.Tensor, mask: torch.Tensor = None) -> torch.Tensor:
+    def call(self, mask: torch.Tensor, embed: torch.Tensor = None) -> torch.Tensor:
         """
         Forward pass for precomputed embeddings.
         Args:
-            embed: [B, L, d_model]
             mask:  [B, L, L] causal attention mask (float mask with -inf or 0)
+            embed: [B, L, d_model]
         Returns:
             [B, vocab_size, state_size] logit at final position
         """
