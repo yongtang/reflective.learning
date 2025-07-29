@@ -24,6 +24,107 @@ f_string_to_facing = functools.partial(list.index, facing_space)
 f_facing_to_string = functools.partial(operator.getitem, facing_space)
 
 
+def f_observation(env_size, steps):
+    env = minigrid.envs.EmptyEnv(
+        size=env_size, max_steps=0, render_mode=None
+    )  # disable truncation
+    env.reset()
+
+    start = tuple(env.agent_pos)
+    facing = env.agent_dir
+    action = []
+
+    try:
+        for _ in range(steps):
+            step = env.action_space.sample()
+            env.step(step)
+            action.append(step)
+    finally:
+        goal = tuple(env.agent_pos)
+        env.close()
+
+    return goal, start, facing, action
+
+
+def f_verify(env_size, goal, start, facing, action):
+    env = minigrid.envs.EmptyEnv(
+        size=env_size, max_steps=0, render_mode=None
+    )  # disable truncation
+    env.reset()
+
+    env.agent_pos = list(start)
+    env.agent_dir = facing
+
+    try:
+        if tuple(env.agent_pos) == goal:
+            return 1  # reached without any steps
+
+        for i, step in enumerate(action):
+            env.step(step)
+            if tuple(env.agent_pos) == goal:
+                return i + 1
+    finally:
+        env.close()
+
+    return len(action) + 1  # did not reach goal
+
+
+def f_render(env_size, goal, start, facing):
+    env = minigrid.envs.EmptyEnv(size=env_size, max_steps=0, render_mode="rgb_array")
+    env.reset()
+
+    # Set agent position and direction
+    env.agent_pos = list(start)
+    env.agent_dir = facing  # 0=right, 1=down, 2=left, 3=up
+
+    # Place a Goal tile at the goal position
+    if tuple(goal) != tuple(start):
+        env.grid.set(goal[0], goal[1], Goal())
+
+    try:
+        img = env.render()
+    finally:
+        env.close()
+
+    return img
+
+
+class IterableDataset(torch.utils.data.IterableDataset):
+    def __init__(self, seed, stub, chance):
+        super().__init__()
+        self.seed = seed
+        self.stub = stub
+        self.chance = chance
+
+    def __iter__(self):
+        while True:
+            if len(self.stub) == 0 or random.random() > self.chance:
+                yield random.choice(self.seed)
+            else:
+                yield random.choice(self.stub)
+
+
+class EmptyEnv(minigrid.envs.EmptyEnv):
+    def __init__(self, goal=None, randomize=False, **kwargs):
+        self.goal = goal
+        self.randomize = randomize
+        super().__init__(**kwargs)
+
+    def _gen_grid(self, width, height):
+        super()._gen_grid(width, height)
+
+        if self.goal:
+            # Remove the default goal at bottom-right
+            self.grid.set(width - 2, height - 2, None)
+            # Place goal at goal
+            self.grid.set(*self.goal, minigrid.core.world_object.Goal())
+        elif self.randomize:
+            # Remove the default goal at bottom-right
+            self.grid.set(width - 2, height - 2, None)
+            # Place goal randomly
+            self.place_obj(minigrid.core.world_object.Goal())
+
+
 def f_goal(grid):
     for x in range(grid.width):
         for y in range(grid.height):
@@ -63,29 +164,6 @@ def f_shortest(goal, start, facing):
     return path
 
 
-def f_variants(actions, max_extra_steps):
-    """
-    Generate variants of the shortest path by injecting small detours (e.g., right->forward->left).
-    Each detour adds 2 steps.
-    """
-    variants = [actions]
-    for extra in range(1, max_extra_steps + 1):
-        path = list(actions)
-        count = 0
-        i = 0
-        while i < len(path) and count < extra:
-            if path[i] == "forward":
-                # Replace one forward with right → forward → left
-                path = path[:i] + ["right", "forward", "left"] + path[i + 1 :]
-                i += 3
-                count += 2
-            else:
-                i += 1
-        if len(path) == len(actions) + extra:
-            variants.append(path)
-    return variants
-
-
 def f_state(entry, env_size, max_steps):
     env = EmptyEnv(
         goal=entry["goal"],
@@ -111,42 +189,6 @@ def f_state(entry, env_size, max_steps):
         return str(step_count)
     else:
         return str(max_steps + 1)
-
-
-class EmptyEnv(minigrid.envs.EmptyEnv):
-    def __init__(self, goal=None, randomize=False, **kwargs):
-        self.goal = goal
-        self.randomize = randomize
-        super().__init__(**kwargs)
-
-    def _gen_grid(self, width, height):
-        super()._gen_grid(width, height)
-
-        if self.goal:
-            # Remove the default goal at bottom-right
-            self.grid.set(width - 2, height - 2, None)
-            # Place goal at goal
-            self.grid.set(*self.goal, minigrid.core.world_object.Goal())
-        elif self.randomize:
-            # Remove the default goal at bottom-right
-            self.grid.set(width - 2, height - 2, None)
-            # Place goal randomly
-            self.place_obj(minigrid.core.world_object.Goal())
-
-
-class IterableDataset(torch.utils.data.IterableDataset):
-    def __init__(self, seed, stub, chance):
-        super().__init__()
-        self.seed = seed
-        self.stub = stub
-        self.chance = chance
-
-    def __iter__(self):
-        while True:
-            if len(self.stub) == 0 or random.random() > self.chance:
-                yield random.choice(self.seed)
-            else:
-                yield random.choice(self.stub)
 
 
 def train_sample(env_size, max_steps, num_samples, save_sample, save_image, randomize):
