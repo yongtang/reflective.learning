@@ -278,7 +278,7 @@ def train_initial(save_sample, max_steps, save_data):
     }
     data_info = json.dumps(info)
 
-    data_seed = "\n".join(set(f_seed(sample) for sample in data_sample)) + "\n"
+    data_seed = "\n".join(set(f_seed(entry, max_steps) for entry in data_sample)) + "\n"
 
     decoder = torch.nn.TransformerDecoder(
         torch.nn.TransformerDecoderLayer(
