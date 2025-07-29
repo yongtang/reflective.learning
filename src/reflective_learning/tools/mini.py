@@ -140,16 +140,22 @@ def f_entry(env_size, goal, start, facing, action, image):
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed_file, seed_index, stub_file, stub_index, chance):
         super().__init__()
-        self.seed_file, self.seed_index = seed_file, seed_index
-        self.stub_file, self.stub_index = stub_file, stub_index
+        self.seed = seed_file, seed_index
+        self.stub = stub_file, stub_index
         self.chance = chance
 
     def __iter__(self):
         while True:
-            if len(self.stub) == 0 or random.random() > self.chance:
-                yield random.choice(self.seed)
+            if np.random.rand() > self.chance:
+                selection = self.seed
             else:
-                yield random.choice(self.stub)
+                selection = self.stub
+            file, index = selection
+            offset = np.random.choice(index)
+            file.seek(offset)
+            line = file.readline()
+            if line.strip():
+                yield line
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
