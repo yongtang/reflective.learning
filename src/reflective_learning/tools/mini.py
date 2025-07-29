@@ -212,7 +212,7 @@ def train_sample(env_size, max_steps, num_samples, save_sample, save_image, rand
     print(f"Wrote {len(samples)} samples to {save_sample}")
 
 
-def f_seed(entry, max_steps):
+def f_seed(entry, env_size, max_steps):
     seed = {
         "text": entry["text"],
         "image": entry["image"],
@@ -223,7 +223,7 @@ def f_seed(entry, max_steps):
             else str(max_steps + 1)
         ),
     }
-    assert f_state(seed["token"]) == seed["state"]
+    assert f_state(seed["token"], env_size, max_steps) == seed["state"]
     return json.dumps(seed, sort_keys=True)
 
 
@@ -278,7 +278,10 @@ def train_initial(save_sample, max_steps, save_data):
     }
     data_info = json.dumps(info)
 
-    data_seed = "\n".join(set(f_seed(entry, max_steps) for entry in data_sample)) + "\n"
+    data_seed = (
+        "\n".join(set(f_seed(entry, env_size, max_steps) for entry in data_sample))
+        + "\n"
+    )
 
     decoder = torch.nn.TransformerDecoder(
         torch.nn.TransformerDecoderLayer(
