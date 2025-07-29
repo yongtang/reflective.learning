@@ -213,6 +213,7 @@ def train_sample(env_size, max_steps, num_samples, save_sample, save_image, rand
 
 
 def f_seed(entry, env_size, max_steps):
+    state = f_state(entry, env_size, max_steps)
     seed = {
         "text": entry["text"],
         "image": entry["image"],
@@ -223,7 +224,6 @@ def f_seed(entry, env_size, max_steps):
             else str(max_steps + 1)
         ),
     }
-    state = f_state(seed["token"], env_size, max_steps)
     assert state == seed["state"], f'state mismatch {state} vs. {seed["state"]}'
     return json.dumps(seed, sort_keys=True)
 
