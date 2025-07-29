@@ -346,7 +346,7 @@ def main():
     learn_parser.add_argument("--device")
 
     args = parser.parse_args()
-    print(f"args: {vars(args)}")
+    print(f"Load args: {json.dumps(vars(args))}")
 
     if args.mode == "seed":
         run_seed(
