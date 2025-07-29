@@ -225,7 +225,9 @@ def f_seed(entry, env_size, max_steps):
             else str(max_steps + 1)
         ),
     }
-    assert state == seed["state"], f'state mismatch {state} vs. {seed["state"]}'
+    assert (
+        state == seed["state"]
+    ), f'state mismatch {entry} vs. {seed} - {state} vs. {seed["state"]}'
     return json.dumps(seed, sort_keys=True)
 
 
