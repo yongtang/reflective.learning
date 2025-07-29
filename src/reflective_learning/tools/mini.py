@@ -140,17 +140,6 @@ def f_entry(env_size, goal, start, facing, action, image):
     )
 
 
-def f_index(file):
-    off = 0
-    offset = []
-    with open(file, "rb") as f:
-        for line in f:
-            if line.strip():
-                offset.append(off)
-            off += len(line)
-    return np.array(offset, dtype=np.int64)
-
-
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed, stub, chance):
         super().__init__()
@@ -168,7 +157,7 @@ class IterableDataset(torch.utils.data.IterableDataset):
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     iteration = 0
-    with open(save_seed, "w") as f:
+    with open(save_seed, "wb") as f:
         with tqdm(
             total=num_seeds, desc="Seed", dynamic_ncols=True, unit=" seed"
         ) as progress:
@@ -214,11 +203,11 @@ def run_spin(seed, data, image, max_steps):
 
         return False
 
-    with open(seed, "r") as f:
+    with open(seed, "rb") as f:
         fail = list(filter(f_fail, f))
         assert len(fail) == 0, f"invalid seed:\n  {'  '.join(fail)}"
 
-    with open(seed, "r") as f:
+    with open(seed, "rb") as f:
         env_size = {json.loads(line)["env"] for line in f if line.strip()}
         assert len(env_size) == 1
     env_size = next(iter(env_size))
@@ -253,11 +242,11 @@ def run_spin(seed, data, image, max_steps):
     os.makedirs(data, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(data, "model.pt"))
 
-    with open(os.path.join(data, "info.json"), "w") as f:
+    with open(os.path.join(data, "info.json"), "wb") as f:
         f.write(json.dumps(info))
 
-    with open(os.path.join(data, "seed.data"), "w") as f:
-        with open(seed, "r") as g:
+    with open(os.path.join(data, "seed.data"), "wb") as f:
+        with open(seed, "rb") as g:
             for line in g:
                 if line.strip():
                     entry = json.loads(line)
@@ -277,11 +266,11 @@ def run_spin(seed, data, image, max_steps):
                     )
 
 
-def run_learn(data, image, total, batch, save_interval, device):
+def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
     lr = 1e-3
 
-    with open(os.path.join(data, "info.json"), "r") as f:
+    with open(os.path.join(data, "info.json"), "rb") as f:
         info = json.loads(f.read())
     print(f"Load info: {json.dumps(info)}")
 
@@ -296,10 +285,23 @@ def run_learn(data, image, total, batch, save_interval, device):
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
+    with open(os.path.join(data, "seed.data"), "rb") as f:
+        off = 0
+        offset = []
+        for line in f:
+            if line.strip():
+                offset.append(off)
+            off += len(line)
+    seed_index = np.array(offset, dtype=np.int64)
+
+    with open(os.path.join(data, "stub.data"), "wb") as f:
+        pass
+    stub_index = np.zeros(reservoir, dtype=np.int64)
+
     assert False
     data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
     if len(data_seed) == 0:
-        with open(os.path.join(save_data, "seed.json"), "r") as f:
+        with open(os.path.join(save_data, "seed.json"), "rb") as f:
             for i, line in enumerate(f):
                 data_seed.append(
                     f_data(
@@ -314,7 +316,7 @@ def run_learn(data, image, total, batch, save_interval, device):
 
     data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
     if len(data_stub) == 0:
-        with open(os.path.join(save_data, "stub.json"), "r") as f:
+        with open(os.path.join(save_data, "stub.json"), "rb") as f:
             for i, line in enumerate(f):
                 data_stub.append(
                     f_data(
@@ -439,11 +441,11 @@ def train_initial(save_sample, max_steps, save_data):
     os.makedirs(save_data, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(save_data, "model.pt"))
 
-    with open(os.path.join(save_data, "info.json"), "w") as f:
+    with open(os.path.join(save_data, "info.json"), "wb") as f:
         f.write(data_info)
-    with open(os.path.join(save_data, "seed.json"), "w") as f:
+    with open(os.path.join(save_data, "seed.json"), "wb") as f:
         f.write(data_seed)
-    with open(os.path.join(save_data, "stub.json"), "w") as f:
+    with open(os.path.join(save_data, "stub.json"), "wb") as f:
         pass
 
 
@@ -477,7 +479,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
 
     lr = 1e-3
 
-    with open(os.path.join(save_data, "info.json"), "r") as f:
+    with open(os.path.join(save_data, "info.json"), "rb") as f:
         info = json.loads(f.read())
     print(f"Load info: {json.dumps(info)}")
 
@@ -505,7 +507,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
 
     data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
     if len(data_seed) == 0:
-        with open(os.path.join(save_data, "seed.json"), "r") as f:
+        with open(os.path.join(save_data, "seed.json"), "rb") as f:
             for i, line in enumerate(f):
                 data_seed.append(
                     f_data(
@@ -520,7 +522,7 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
 
     data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
     if len(data_stub) == 0:
-        with open(os.path.join(save_data, "stub.json"), "r") as f:
+        with open(os.path.join(save_data, "stub.json"), "rb") as f:
             for i, line in enumerate(f):
                 data_stub.append(
                     f_data(
@@ -579,6 +581,7 @@ def main():
     learn_parser.add_argument("--image", required=True)
     learn_parser.add_argument("--total", type=int, required=True)
     learn_parser.add_argument("--batch", type=int, required=True)
+    learn_parser.add_argument("--reservoir", type=int, required=True)
     learn_parser.add_argument("--save-interval", type=int, required=True)
     learn_parser.add_argument("--device")
 
@@ -607,6 +610,7 @@ def main():
             image=args.image,
             total=args.total,
             batch=args.batch,
+            reservoir=args.reservoir,
             save_interval=args.save_interval,
             device=args.device,
         )
