@@ -12,7 +12,7 @@ import PIL.Image
 import torch
 from tqdm import tqdm
 
-from reflective_learning.context import ContextEncoder
+from reflective_learning.encoder import ContextEncoder
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import train
 
@@ -292,12 +292,11 @@ def run_learn(data, image, total, batch, save_interval, device):
     model.load_state_dict(
         torch.load(os.path.join(data, "model.pt"), map_location=device)
     )
-    print(f"Load model: {os.path.join(save_data, 'model.pt')}")
-
-    assert False
+    print(f"Load model: {os.path.join(data, 'model.pt')}")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
+    assert False
     data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
     if len(data_seed) == 0:
         with open(os.path.join(save_data, "seed.json"), "r") as f:
