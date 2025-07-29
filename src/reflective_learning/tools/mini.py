@@ -16,31 +16,31 @@ from reflective_learning.context import ContextEncoder
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import train
 
-action_space = ["left", "right", "forward"]
+action_space = [
+    minigrid.core.actions.Actions.left,
+    minigrid.core.actions.Actions.right,
+    minigrid.core.actions.Actions.forward,
+]
 facing_space = ["right", "down", "left", "up"]
-
-f_action = functools.partial(list.index, action_space)
-f_string_to_facing = functools.partial(list.index, facing_space)
-f_facing_to_string = functools.partial(operator.getitem, facing_space)
 
 
 def f_observation(env_size, steps):
     env = minigrid.envs.EmptyEnv(
-        size=env_size, max_steps=0, render_mode=None
+        size=env_size, max_steps=steps, render_mode=None
     )  # disable truncation
     env.reset()
 
-    start = tuple(env.agent_pos)
-    facing = env.agent_dir
+    start = tuple(int(v) for v in env.agent_pos)
+    facing = facing_space[env.agent_dir]
     action = []
 
     try:
         for _ in range(steps):
-            step = env.action_space.sample()
+            step = random.choice(action_space)
             env.step(step)
-            action.append(step)
+            action.append(step.name)
     finally:
-        goal = tuple(env.agent_pos)
+        goal = tuple(int(v) for v in env.agent_pos)
         env.close()
 
     return goal, start, facing, action
@@ -89,6 +89,31 @@ def f_render(env_size, goal, start, facing):
     return img
 
 
+def f_model(info):
+    vocab_size = len(action_space)
+    state_size = info["max"] + 2
+    max_seq_len = info["max"] + 2
+    max_prefix_len = 512
+
+    decoder = torch.nn.TransformerDecoder(
+        torch.nn.TransformerDecoderLayer(
+            batch_first=True,
+            **info["layer"],
+        ),
+        **info["decoder"],
+    )
+
+    model = ReflectiveCore(
+        vocab_size=vocab_size,
+        state_size=state_size,
+        max_seq_len=max_seq_len,
+        max_prefix_len=max_prefix_len,
+        decoder=decoder,
+    )
+
+    return model
+
+
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed, stub, chance):
         super().__init__()
@@ -104,155 +129,180 @@ class IterableDataset(torch.utils.data.IterableDataset):
                 yield random.choice(self.stub)
 
 
-class EmptyEnv(minigrid.envs.EmptyEnv):
-    def __init__(self, goal=None, randomize=False, **kwargs):
-        self.goal = goal
-        self.randomize = randomize
-        super().__init__(**kwargs)
+def run_seed(env_size, max_steps, num_seeds, save_seed):
+    iteration = 0
+    with open(save_seed, "w") as f:
+        with tqdm(
+            total=num_seeds, desc="Seed", dynamic_ncols=True, unit=" seed"
+        ) as progress:
+            count = 0
+            while count < num_seeds:
+                iteration += 1
+                steps = random.randint(1, max_steps)
+                goal, start, facing, action = f_observation(env_size, steps)
 
-    def _gen_grid(self, width, height):
-        super()._gen_grid(width, height)
+                if list(goal) == list(start):
+                    continue  # skip invalid seed
+                seed = {
+                    "env": env_size,
+                    "goal": goal,
+                    "start": start,
+                    "facing": facing,
+                    "action": action,
+                }
 
-        if self.goal:
-            # Remove the default goal at bottom-right
-            self.grid.set(width - 2, height - 2, None)
-            # Place goal at goal
-            self.grid.set(*self.goal, minigrid.core.world_object.Goal())
-        elif self.randomize:
-            # Remove the default goal at bottom-right
-            self.grid.set(width - 2, height - 2, None)
-            # Place goal randomly
-            self.place_obj(minigrid.core.world_object.Goal())
-
-
-def f_goal(grid):
-    for x in range(grid.width):
-        for y in range(grid.height):
-            obj = grid.get(x, y)
-            if obj and obj.type == "goal":
-                return [x, y]
-    raise ValueError("Goal not found in grid")
-
-
-def f_shortest(goal, start, facing):
-    path = []
-    x, y = start
-    gx, gy = goal
-
-    def rotate_to(desired_facing, current_facing):
-        turns = []
-        while current_facing != desired_facing:
-            turns.append("right")
-            current_facing = (current_facing + 1) % 4
-        return turns, current_facing
-
-    if gx != x:
-        desired = 0 if gx > x else 2
-        turns, facing = rotate_to(desired, facing)
-        path.extend(turns)
-        for _ in range(abs(gx - x)):
-            path.append("forward")
-        x = gx
-
-    if gy != y:
-        desired = 1 if gy > y else 3
-        turns, facing = rotate_to(desired, facing)
-        path.extend(turns)
-        for _ in range(abs(gy - y)):
-            path.append("forward")
-
-    return path
+                f.write(json.dumps(seed, sort_keys=True) + "\n")
+                progress.set_postfix_str(
+                    f"steps={steps:3d} saved={count+1:6d} iteration={iteration:6d}"
+                )
+                progress.update(1)
+                count += 1
 
 
-def f_state(entry, env_size, max_steps):
-    env = EmptyEnv(
-        goal=entry["goal"],
-        randomize=False,
-        size=env_size,
-        agent_start_pos=np.array(entry["start"]),
-        agent_start_dir=f_string_to_facing(entry["facing"]),
-        render_mode="ansi",
+def run_spin(seed, data, image, max_steps):
+    def f_fail(line):
+        entry = json.loads(line)
+        if not (0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1):
+            return True
+        if not (0 < entry["goal"][1] and entry["goal"][1] < entry["env"] - 1):
+            return True
+        if not (0 < entry["start"][0] and entry["start"][0] < entry["env"] - 1):
+            return True
+        if not (0 < entry["start"][1] and entry["start"][1] < entry["env"] - 1):
+            return True
+        if not (entry["facing"] in facing_space):
+            return True
+        if not (all(e in [v.name for v in action_space] for e in entry["action"])):
+            return True
+
+        return False
+
+    with open(seed, "r") as f:
+        fail = list(filter(f_fail, f))
+        assert len(fail) == 0, f"invalid seed:\n  {'  '.join(fail)}"
+
+    with open(seed, "r") as f:
+        env_size = {json.loads(line)["env"] for line in f if line.strip()}
+        assert len(env_size) == 1
+    env_size = next(iter(env_size))
+
+    info = {
+        "env": env_size,
+        "max": max_steps,
+        "layer": {
+            "d_model": 768,
+            "nhead": 12,
+            "dim_feedforward": 3072,
+            "dropout": 0.1,
+        },
+        "decoder": {
+            "num_layers": 12,
+        },
+        "context": {
+            "text": {
+                "model": "gpt2",
+                "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+            },
+            "image": {
+                "model": "google/vit-base-patch16-224",
+                "revision": "3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3",
+            },
+            "transformers": "4.50.0",
+        },
+    }
+
+    model = f_model(info)
+
+    os.makedirs(data, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(data, "model.pt"))
+
+    with open(os.path.join(data, "info.json"), "w") as f:
+        f.write(json.dumps(info))
+
+    assert False
+
+    data_seed = (
+        "\n".join(set(f_seed(entry, env_size, max_steps) for entry in data_sample))
+        + "\n"
     )
-    env.reset()
 
-    step_count = 0
-    for token in entry["token"]:
-        action = f_action(token)
-        _, reward, terminated, truncated, _ = env.step(action)
-        step_count += 1
-        if terminated or truncated:
-            break
-
-    env.close()
-
-    if reward > 0 and step_count <= max_steps:
-        return str(step_count)
-    else:
-        return str(max_steps + 1)
+    with open(os.path.join(save_data, "seed.json"), "w") as f:
+        f.write(data_seed)
+    with open(os.path.join(save_data, "stub.json"), "w") as f:
+        pass
 
 
-def train_sample(env_size, max_steps, num_samples, save_sample, save_image, randomize):
+def run_learn(data, image, total, batch, save_interval, device):
 
-    samples = []
+    lr = 1e-3
 
-    os.makedirs(save_image, exist_ok=True)
+    with open(os.path.join(data, "info.json"), "r") as f:
+        info = json.loads(f.read())
+    print(f"Load info: {json.dumps(info)}")
 
-    with tqdm(total=num_samples, desc="Generating Samples") as progress:
-        for index in range(num_samples):
-            env = EmptyEnv(
-                randomize=randomize,
-                size=env_size,
-                agent_start_pos=None,
-                render_mode="rgb_array",
-            )
-            env.reset()
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-            goal = f_goal(env.unwrapped.grid)
-            start = list(env.unwrapped.agent_pos)
-            facing = f_facing_to_string(env.unwrapped.agent_dir)
+    model = f_model(info).to(device)
 
-            filename = f"goal_{goal[0]}_{goal[1]}_start_{start[0]}_{start[1]}_facing_{facing}.png"
-            if not os.path.exists(os.path.join(save_image, filename)):
+    model.load_state_dict(
+        torch.load(os.path.join(data, "model.pt"), map_location=device)
+    )
+    print(f"Load model: {os.path.join(save_data, 'model.pt')}")
 
-                img = env.render()
-                image = PIL.Image.fromarray(img)
-                image.save(os.path.join(save_image, filename))
+    assert False
 
-            sample = {
-                "text": [
-                    f"goal {goal[0]},{goal[1]}",
-                    f"start {start[0]},{start[1]}",
-                    f"facing {facing}",
-                ],
-                "image": [filename],
-                "env": (
-                    f"MiniGrid-Empty-Random-{env_size}x{env_size}"
-                    if randomize
-                    else f"MiniGrid-Empty-{env_size}x{env_size}"
-                ),
-                "goal": [int(x) for x in goal],
-                "start": [int(x) for x in start],
-                "facing": facing,
-            }
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-            shortest = f_shortest(
-                goal=goal, start=start, facing=f_string_to_facing(facing)
-            )
-            max_extra_steps = max(0, max_steps - len(shortest))
-            variants = f_variants(shortest, max_extra_steps)
-            sample["token"] = random.choice(variants)
+    data_seed = diskcache.Deque(directory=os.path.join(save_data, "seed.data"))
+    if len(data_seed) == 0:
+        with open(os.path.join(save_data, "seed.json"), "r") as f:
+            for i, line in enumerate(f):
+                data_seed.append(
+                    f_data(
+                        json.loads(line),
+                        save_image,
+                        encoder,
+                        model,
+                        info["core"]["max_seq_len"],
+                    )
+                )
+    print(f"Load seed: {len(data_seed)}")
 
-            samples.append(sample)
-            env.close()
-            progress.update(1)
+    data_stub = diskcache.Deque(directory=os.path.join(save_data, "stub.data"))
+    if len(data_stub) == 0:
+        with open(os.path.join(save_data, "stub.json"), "r") as f:
+            for i, line in enumerate(f):
+                data_stub.append(
+                    f_data(
+                        json.loads(line),
+                        save_image,
+                        encoder,
+                        model,
+                        info["core"]["max_seq_len"],
+                    )
+                )
+    print(f"Load stub: {len(data_stub)}")
 
-    json_strings = [json.dumps(sample, sort_keys=True) for sample in samples]
-    unique_json_strings = list(set(json_strings))
+    dataset = IterableDataset(data_seed, data_stub, chance=0.5)
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        collate_fn=model.collate,
+    )
 
-    with open(save_sample, "w") as f:
-        f.write("\n".join(unique_json_strings) + "\n")
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    print(f"Wrote {len(samples)} samples to {save_sample}")
+    train(
+        model=model,
+        loader=loader,
+        optimizer=optimizer,
+        total=total,
+        save_data=save_data,
+        save_interval=save_interval,
+        callback_func=None,
+        callback_interval=0,
+        device=device,
+    )
 
 
 def f_seed(entry, env_size, max_steps):
@@ -462,70 +512,57 @@ def train_continue(save_data, save_image, total, batch_size, save_interval, devi
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="MiniGrid Model Pipeline CLI (Reflective + RL)"
-    )
-    parser.add_argument(
-        "--mode",
-        required=True,
-        choices=[
-            "sample",
-            "initial",
-            "continue",
-        ],
-    )
+    parser = argparse.ArgumentParser(description="MiniGrid Reflective Model CLI")
+    subparsers = parser.add_subparsers(dest="mode", required=True)
 
-    parser.add_argument("--env-size", type=int)
-    parser.add_argument("--max-steps", type=int)
-    parser.add_argument("--num-samples", type=int)
-    parser.add_argument("--save-sample")
-    parser.add_argument("--save-data")
-    parser.add_argument("--save-image")
-    parser.add_argument("--total", type=int)
-    parser.add_argument("--batch-size", type=int)
-    parser.add_argument("--save-interval", type=int)
-    parser.add_argument("--device")
-    parser.add_argument("--randomize", type=bool, default=True)
+    # ---- seed mode ----
+    seed_parser = subparsers.add_parser("seed", help="Seed mode")
+    seed_parser.add_argument("--env-size", type=int, required=True)
+    seed_parser.add_argument("--max-steps", type=int, required=True)
+    seed_parser.add_argument("--num-seeds", type=int, required=True)
+    seed_parser.add_argument("--save-seed", required=True)
+
+    # ---- spin mode ----
+    spin_parser = subparsers.add_parser("spin", help="Spin mode")
+    spin_parser.add_argument("--seed", required=True)
+    spin_parser.add_argument("--data", required=True)
+    spin_parser.add_argument("--image", required=True)
+    spin_parser.add_argument("--max-steps", type=int, required=True)
+
+    # ---- learn mode ----
+    learn_parser = subparsers.add_parser("learn", help="Learn mode")
+    learn_parser.add_argument("--data", required=True)
+    learn_parser.add_argument("--image", required=True)
+    learn_parser.add_argument("--total", type=int, required=True)
+    learn_parser.add_argument("--batch", type=int, required=True)
+    learn_parser.add_argument("--save-interval", type=int, required=True)
+    learn_parser.add_argument("--device")
 
     args = parser.parse_args()
-
     print(f"args: {vars(args)}")
 
-    if args.mode == "sample":
-        required = ["env_size", "max_steps", "num_samples", "save_sample", "save_image"]
-        required = [name for name in required if not getattr(args, name)]
-        assert not required, f"Missing required arguments: {', '.join(required)}"
-
-        train_sample(
+    if args.mode == "seed":
+        run_seed(
             env_size=args.env_size,
             max_steps=args.max_steps,
-            num_samples=args.num_samples,
-            save_sample=args.save_sample,
-            save_image=args.save_image,
-            randomize=args.randomize,
+            num_seeds=args.num_seeds,
+            save_seed=args.save_seed,
         )
 
-    elif args.mode == "initial":
-        required = ["save_sample", "max_steps", "save_data"]
-        required = [name for name in required if not getattr(args, name)]
-        assert not required, f"Missing required arguments: {', '.join(required)}"
-
-        train_initial(
-            save_sample=args.save_sample,
+    elif args.mode == "spin":
+        run_spin(
+            seed=args.seed,
+            data=args.data,
+            image=args.image,
             max_steps=args.max_steps,
-            save_data=args.save_data,
         )
 
-    elif args.mode == "continue":
-        required = ["save_data", "save_image", "total", "batch_size", "save_interval"]
-        required = [name for name in required if not getattr(args, name)]
-        assert not required, f"Missing required arguments: {', '.join(required)}"
-
-        train_continue(
-            save_data=args.save_data,
-            save_image=args.save_image,
+    elif args.mode == "learn":
+        run_learn(
+            data=args.data,
+            image=args.image,
             total=args.total,
-            batch_size=args.batch_size,
+            batch=args.batch,
             save_interval=args.save_interval,
             device=args.device,
         )
