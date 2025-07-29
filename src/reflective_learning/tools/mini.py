@@ -114,6 +114,17 @@ def f_model(info):
     return model
 
 
+def f_index(file):
+    off = 0
+    offset = []
+    with open(file, "rb") as f:
+        for line in f:
+            if line.strip():
+                offset.append(off)
+            off += len(line)
+    np.save(file + ".npy", np.array(offset, dtype=np.int64))
+
+
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed, stub, chance):
         super().__init__()
