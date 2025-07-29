@@ -212,17 +212,18 @@ def train_sample(env_size, max_steps, num_samples, save_sample, save_image, rand
     print(f"Wrote {len(samples)} samples to {save_sample}")
 
 
-def f_seed(sample):
+def f_seed(entry):
     seed = {
-        "text": sample["text"],
-        "image": sample["image"],
-        "token": sample["token"][: max_steps + 1],
+        "text": entry["text"],
+        "image": entry["image"],
+        "token": entry["token"][: max_steps + 1],
         "state": (
-            str(len(sample["token"]))
-            if len(sample["token"]) <= max_steps
+            str(len(entry["token"]))
+            if len(entry["token"]) <= max_steps
             else str(max_steps + 1)
         ),
     }
+    assert f_state(seed["token"]) == seed["state"]
     return json.dumps(seed, sort_keys=True)
 
 
