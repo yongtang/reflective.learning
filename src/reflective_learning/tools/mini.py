@@ -53,14 +53,14 @@ def f_verify(env_size, goal, start, facing, action):
     env.reset()
 
     env.agent_pos = list(start)
-    env.agent_dir = facing
+    env.agent_dir = facing_space.index(facing)
 
     try:
         if tuple(env.agent_pos) == goal:
             return 1  # reached without any steps
 
         for i, step in enumerate(action):
-            env.step(step)
+            env.step(getattr(minigrid.core.actions.Actions, step))
             if tuple(env.agent_pos) == goal:
                 return i + 1
     finally:
@@ -73,13 +73,15 @@ def f_render(env_size, goal, start, facing):
     env = minigrid.envs.EmptyEnv(size=env_size, max_steps=0, render_mode="rgb_array")
     env.reset()
 
+    print("PRINT: ", env_size, goal, start, facing)
+
     # Set agent position and direction
     env.agent_pos = list(start)
-    env.agent_dir = facing  # 0=right, 1=down, 2=left, 3=up
+    env.agent_dir = facing_space.index(facing)
 
     # Place a Goal tile at the goal position
     if tuple(goal) != tuple(start):
-        env.grid.set(goal[0], goal[1], Goal())
+        env.grid.set(goal[0], goal[1], minigrid.core.world_object.Goal())
 
     try:
         img = env.render()
@@ -114,6 +116,30 @@ def f_model(info):
     return model
 
 
+def f_entry(env_size, goal, start, facing, action, image):
+    filename = f"env_{env_size}_goal_{goal[0]}_{goal[1]}_start_{start[0]}_{start[1]}_facing_{facing}.png"
+    if not os.path.exists(os.path.join(image, filename)):
+        os.makedirs(image, exist_ok=True)
+        img = f_render(env_size, goal, start, facing)
+        PIL.Image.fromarray(img).save(os.path.join(image, filename))
+
+    state = f_verify(env_size, goal, start, facing, action)
+
+    return json.dumps(
+        {
+            "text": [
+                f"goal {goal[0]},{goal[1]}",
+                f"start {start[0]},{start[1]}",
+                f"facing {facing}",
+            ],
+            "image": [filename],
+            "token": action,
+            "state": state,
+        },
+        sort_keys=True,
+    )
+
+
 def f_index(file):
     off = 0
     offset = []
@@ -122,7 +148,7 @@ def f_index(file):
             if line.strip():
                 offset.append(off)
             off += len(line)
-    np.save(file + ".npy", np.array(offset, dtype=np.int64))
+    return np.array(offset, dtype=np.int64)
 
 
 class IterableDataset(torch.utils.data.IterableDataset):
@@ -230,17 +256,25 @@ def run_spin(seed, data, image, max_steps):
     with open(os.path.join(data, "info.json"), "w") as f:
         f.write(json.dumps(info))
 
-    assert False
+    with open(os.path.join(data, "seed.data"), "w") as f:
+        with open(seed, "r") as g:
+            for line in g:
+                if line.strip():
+                    entry = json.loads(line)
 
-    data_seed = (
-        "\n".join(set(f_seed(entry, env_size, max_steps) for entry in data_sample))
-        + "\n"
-    )
-
-    with open(os.path.join(save_data, "seed.json"), "w") as f:
-        f.write(data_seed)
-    with open(os.path.join(save_data, "stub.json"), "w") as f:
-        pass
+                    f.write(
+                        json.dumps(
+                            f_entry(
+                                env_size,
+                                entry["goal"],
+                                entry["start"],
+                                entry["facing"],
+                                entry["action"][:max_steps],
+                                image,
+                            )
+                        )
+                        + "\n"
+                    )
 
 
 def run_learn(data, image, total, batch, save_interval, device):
