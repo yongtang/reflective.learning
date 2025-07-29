@@ -7,6 +7,7 @@ import random
 
 import diskcache
 import minigrid
+import numpy as np
 import PIL.Image
 import torch
 from tqdm import tqdm
