@@ -56,9 +56,9 @@ def test_train_sanity():
             loader=loader,
             optimizer=optimizer,
             total=20,
-            save_data=tmpdir,
+            save=tmpdir,
             save_interval=10,
-            callback_func=None,
+            callback=None,
             callback_interval=20,
             device=torch.device("cpu"),
         )
@@ -107,9 +107,9 @@ def test_checkpoint_rotation():
             loader=loader,
             optimizer=optimizer,
             total=40,
-            save_data=tmpdir,
+            save=tmpdir,
             save_interval=8,  # Should save at 8, 16, 24, 32
-            callback_func=None,
+            callback=None,
             callback_interval=999,
             device=torch.device("cpu"),
         )
@@ -154,7 +154,7 @@ def test_callback_invoked():
 
     calls = []
 
-    def callback_fn(model, count):
+    def callback(model, count):
         calls.append(count)
 
     tmpdir = tempfile.mkdtemp()
@@ -164,9 +164,9 @@ def test_callback_invoked():
             loader=loader,
             optimizer=optimizer,
             total=10,
-            save_data=tmpdir,
+            save=tmpdir,
             save_interval=100,
-            callback_func=callback_fn,
+            callback=callback,
             callback_interval=4,  # Should trigger at 4 and 8
             device=torch.device("cpu"),
         )
