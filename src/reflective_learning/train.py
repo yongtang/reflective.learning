@@ -12,9 +12,9 @@ def train(
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     total: int,
-    save_data: str,
+    save: str,
     save_interval: int,
-    callback_func: Callable[[ReflectiveCore, int], None],
+    callback: Callable[[ReflectiveCore, int], None],
     callback_interval: int,
     device: Optional[torch.device] = None,
 ):
@@ -26,16 +26,16 @@ def train(
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
         total: Total number of training samples to process.
-        save_data: Directory where model checkpoints will be saved.
+        save: Directory where model checkpoints will be saved.
         save_interval: Save model every N samples.
-        callback_func: A function called periodically during training (e.g., for inference).
+        callback: A function called periodically during training (e.g., for inference).
         callback_interval: Interval (in samples) at which to invoke the callback.
         device: Optional device override (defaults to CUDA if available).
     """
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    os.makedirs(save_data, exist_ok=True)
+    os.makedirs(save, exist_ok=True)
     saved = []
     count = 0
 
@@ -67,7 +67,7 @@ def train(
 
             # Save checkpoint
             if count % save_interval < batch_size:
-                filename = os.path.join(save_data, f"model_{count}.pt")
+                filename = os.path.join(save, f"model_{count}.pt")
                 torch.save(model.state_dict(), filename)
                 saved.append(filename)
                 progress.write(f"[Checkpoint] Saved to {filename}")
@@ -77,13 +77,13 @@ def train(
                         os.remove(oldest)
 
             # Run callback
-            if callback_func and count % callback_interval < batch_size:
-                callback_func(model, count)
+            if callback and count % callback_interval < batch_size:
+                callback(model, count)
 
             if count >= total:
                 break
 
     # Final save
-    final_filename = os.path.join(save_data, "model.pt")
+    final_filename = os.path.join(save, "model.pt")
     torch.save(model.state_dict(), final_filename)
     tqdm.write(f"[Final Save] Saved to {final_filename}")

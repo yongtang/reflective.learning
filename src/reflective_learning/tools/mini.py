@@ -138,10 +138,10 @@ def f_entry(env_size, goal, start, facing, action, image):
 
 
 class IterableDataset(torch.utils.data.IterableDataset):
-    def __init__(self, seed, stub, chance):
+    def __init__(self, seed_file, seed_index, stub_file, stub_index, chance):
         super().__init__()
-        self.seed = seed
-        self.stub = stub
+        self.seed_file, self.seed_index = seed_file, seed_index
+        self.stub_file, self.stub_index = stub_file, stub_index
         self.chance = chance
 
     def __iter__(self):
@@ -295,26 +295,35 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
         pass
     stub_index = np.zeros(reservoir, dtype=np.int64)
 
-    dataset = IterableDataset(data_seed, data_stub, chance=0.5)
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        collate_fn=model.collate,
-    )
+    with open(os.path.join(data, "seed.data"), "rb") as seed_file:
+        with open(os.path.join(data, "stub.data"), "rb") as stub_file:
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+            dataset = IterableDataset(
+                seed_file,
+                seed_index,
+                stub_file,
+                stub_index,
+                chance=0.5,
+            )
+            loader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=batch,
+                collate_fn=model.collate,
+            )
 
-    train(
-        model=model,
-        loader=loader,
-        optimizer=optimizer,
-        total=total,
-        save_data=save_data,
-        save_interval=save_interval,
-        callback_func=None,
-        callback_interval=0,
-        device=device,
-    )
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+            train(
+                model=model,
+                loader=loader,
+                optimizer=optimizer,
+                total=total,
+                save=data,
+                save_interval=save_interval,
+                callback=None,
+                callback_interval=0,
+                device=device,
+            )
 
 
 def main():
