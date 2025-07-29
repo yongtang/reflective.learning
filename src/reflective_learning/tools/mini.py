@@ -212,7 +212,7 @@ def train_sample(env_size, max_steps, num_samples, save_sample, save_image, rand
     print(f"Wrote {len(samples)} samples to {save_sample}")
 
 
-def f_seed(entry):
+def f_seed(entry, max_steps):
     seed = {
         "text": entry["text"],
         "image": entry["image"],
