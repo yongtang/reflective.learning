@@ -482,6 +482,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
             optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
             train(
+                info=info,
                 model=model,
                 loader=loader,
                 optimizer=optimizer,

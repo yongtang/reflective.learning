@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import torch
 from tqdm import tqdm
@@ -8,6 +8,7 @@ from reflective_learning.model import ReflectiveCore
 
 
 def train(
+    info: Any,
     model: ReflectiveCore,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
@@ -93,7 +94,7 @@ def train(
             # Save checkpoint
             if count % save_interval < batch_size:
                 filename = os.path.join(save, f"model_{count}.pt")
-                torch.save(model.state_dict(), filename)
+                torch.save({"info": info, "weight": model.state_dict()}, filename)
                 saved.append(filename)
                 progress.write(f"[Checkpoint] Saved to {filename}")
                 if len(saved) > 3:
@@ -110,5 +111,5 @@ def train(
 
     # Final save
     final_filename = os.path.join(save, "model.pt")
-    torch.save(model.state_dict(), final_filename)
+    torch.save({"info": info, "weight": model.state_dict()}, final_filename)
     tqdm.write(f"[Final Save] Saved to {final_filename}")
