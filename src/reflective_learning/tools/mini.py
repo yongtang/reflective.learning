@@ -1,4 +1,5 @@
 import argparse
+import functools
 import json
 import os
 import random
@@ -137,12 +138,42 @@ def f_entry(env_size, goal, start, facing, action, image):
     )
 
 
+def f_line(model, encoder, image, line):
+    entry = json.loads(line)
+    print("ENTRY: ", entry)
+    assert False
+    if "text" not in data or "image" not in data:
+        raise ValueError(f"'text' or 'image' does not exist: {data}")
+    if not isinstance(data["text"], list) or not isinstance(data["image"], list):
+        raise ValueError(f"'text' or 'image' is not a list: {data}")
+
+    data_token = [f_action(token) for token in data["token"]]
+    data_state = int(data["state"])
+
+    images = [os.path.join(save_image, image) for image in data["image"]]
+    prefix = encoder.encode(data["text"], images)
+
+    # Pad or truncate token sequence
+    padded = (data_token + [0] * max_seq_len)[:max_seq_len]
+    token = torch.tensor(padded, dtype=torch.long)
+
+    # Repeat state ID across sequence
+    state = torch.tensor(data_state, dtype=torch.long)
+
+    return {
+        "token": token,
+        "state": state,
+        "prefix": prefix,
+    }
+
+
 class IterableDataset(torch.utils.data.IterableDataset):
-    def __init__(self, seed_file, seed_index, stub_file, stub_index, chance):
+    def __init__(self, seed_file, seed_index, stub_file, stub_index, chance, line_fn):
         super().__init__()
         self.seed = seed_file, seed_index
         self.stub = stub_file, stub_index
         self.chance = chance
+        self.line_fn = line_fn
 
     def __iter__(self):
         while True:
@@ -155,7 +186,7 @@ class IterableDataset(torch.utils.data.IterableDataset):
             file.seek(offset)
             line = file.readline()
             if line.strip():
-                yield line
+                yield self.line_fn(line)
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
@@ -310,6 +341,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 stub_file,
                 stub_index,
                 chance=0.5,
+                line_fn=functools.partial(f_line, model, encoder, image),
             )
             loader = torch.utils.data.DataLoader(
                 dataset,
