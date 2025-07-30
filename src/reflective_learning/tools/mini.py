@@ -171,7 +171,9 @@ def f_line(encoder, image, line):
     }
 
 
-def f_callback(encoder, image, env_size, max_steps, device, model, count):
+def f_callback(
+    encoder, image, data, stub_index, env_size, max_steps, device, model, count
+):
     # goal, start, facing
     while True:
         goal = random.randint(1, env_size - 1), random.randint(1, env_size - 1)
@@ -203,9 +205,15 @@ def f_callback(encoder, image, env_size, max_steps, device, model, count):
     action = [minigrid.core.actions.Actions(e.item()).name for e in token]
     print(f"Prediction: {token} {action}")
 
-    stub = json.dumps(f_entry(env_size, max_steps, goal, start, facing, action, image))
+    stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
     print(f"Stub: {stub}")
 
+    with open(os.join(data, "stub.data"), "a") as f:
+        f.seek(0, os.SEEK_END)
+        offset = f.tell()
+        f.write(json.dumps(stub) + "\n")
+
+    selection = np.random.choice(stub_index)
     stub_index[selection] = offset
 
 
@@ -471,7 +479,14 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 save=data,
                 save_interval=save_interval,
                 callback=functools.partial(
-                    f_callback, encoder, image, info["env"], info["max"], device
+                    f_callback,
+                    encoder,
+                    image,
+                    data,
+                    stub_index,
+                    info["env"],
+                    info["max"],
+                    device,
                 ),
                 callback_interval=1,
                 device=device,
