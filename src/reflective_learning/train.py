@@ -32,6 +32,15 @@ def train(
         callback_interval: Interval (in samples) at which to invoke the callback.
         device: Optional device override (defaults to CUDA if available).
     """
+
+    loss_width = 7
+    sample_width = len(str(total))
+    bar_format = (
+        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
+        f"{{n:{sample_width}d}}/{{total:{sample_width}d}} "
+        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+    )
+
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -39,7 +48,13 @@ def train(
     saved = []
     count = 0
 
-    with tqdm(total=total, desc="Training", leave=True, ncols=100) as progress:
+    with tqdm(
+        total=total,
+        desc="Train",
+        dynamic_ncols=True,
+        bar_format=bar_format,
+        unit="sample",
+    ) as progress:
         for batch in loader:
             model.train()
 
@@ -63,7 +78,9 @@ def train(
             batch_size = embed.size(0)
             count += batch_size
             progress.update(batch_size)
-            progress.set_postfix(loss=f"{loss_value:.4f}", samples=count)
+            progress.set_postfix_str(
+                f"loss={loss_value:{loss_width}.4f}  samples={count:{sample_width}d}"
+            )
 
             # Save checkpoint
             if count % save_interval < batch_size:
