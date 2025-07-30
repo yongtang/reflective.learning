@@ -208,7 +208,7 @@ def f_callback(
     stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
     print(f"Stub: {stub}")
 
-    with open(os.join(data, "stub.data"), "a") as f:
+    with open(os.path.join(data, "stub.data"), "a") as f:
         f.seek(0, os.SEEK_END)
         offset = f.tell()
         f.write(json.dumps(stub) + "\n")
