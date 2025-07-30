@@ -74,7 +74,7 @@ def f_render(env_size, max_steps, goal, start, facing):
     env.reset()
 
     # Remove the default goal placed by reset() (bottom-right)
-    env.grid.set(env_size - 2, env_size - 2, minigrid.core.world_object.Empty())
+    env.grid.set(env_size - 2, env_size - 2, None)
 
     # Set agent position and direction
     env.agent_pos = list(start)
