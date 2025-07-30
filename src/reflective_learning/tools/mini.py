@@ -54,12 +54,12 @@ def f_verify(env_size, max_steps, goal, start, facing, action):
     env.agent_dir = facing_space.index(facing)
 
     try:
-        if tuple(env.agent_pos) == goal:
+        if tuple(int(e) for e in env.agent_pos) == tuple(goal):
             return 0  # reached without any steps
 
         for i, step in enumerate(action):
             env.step(getattr(minigrid.core.actions.Actions, step))
-            if tuple(env.agent_pos) == goal:
+            if tuple(int(e) for e in env.agent_pos) == tuple(goal):
                 return i + 1
     finally:
         env.close()
