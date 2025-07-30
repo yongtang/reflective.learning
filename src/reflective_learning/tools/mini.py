@@ -159,6 +159,10 @@ def f_line(model, encoder, image, line):
     }
 
 
+def f_callback(model, count):
+    pass
+
+
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed_file, seed_index, stub_file, stub_index, chance, line_fn):
         super().__init__()
@@ -420,8 +424,8 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 total=total,
                 save=data,
                 save_interval=save_interval,
-                callback=None,
-                callback_interval=0,
+                callback=f_callback,
+                callback_interval=1,
                 device=device,
             )
 

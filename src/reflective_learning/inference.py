@@ -25,41 +25,43 @@ def sequence(
     """
     model.eval()
 
-    V = model.vocab_size
-    S = model.state_size
-    prefix = prefix.unsqueeze(0).to(device)  # [1, C, d_model]
+    with torch.no_grad():
 
-    # Prepare state indices and normalized weights
-    state_indices = torch.arange(S, device=device)  # [S]
-    weight_list = [state_weights[s.item()] for s in state_indices]
-    state_weights_tensor = torch.tensor(weight_list, device=device)
-    state_weights_tensor = state_weights_tensor / state_weights_tensor.sum()
+        V = model.vocab_size
+        S = model.state_size
+        prefix = prefix.unsqueeze(0).to(device)  # [1, C, d_model]
 
-    tokens = torch.empty(0, dtype=torch.long, device=device)  # [T]
+        # Prepare state indices and normalized weights
+        state_indices = torch.arange(S, device=device)  # [S]
+        weight_list = [state_weights[s.item()] for s in state_indices]
+        state_weights_tensor = torch.tensor(weight_list, device=device)
+        state_weights_tensor = state_weights_tensor / state_weights_tensor.sum()
 
-    for _ in range(max_seq_len):
-        T = tokens.shape[0]
+        tokens = torch.empty(0, dtype=torch.long, device=device)  # [T]
 
-        # Expand current sequence across all states — works even when T == 0
-        token_input = tokens.unsqueeze(0).expand(S, -1)  # [S, T]
-        state_input = state_indices  # [S]
-        prefix_input = prefix.expand(S, -1, -1)  # [S, C, d_model]
+        for _ in range(max_seq_len):
+            T = tokens.shape[0]
 
-        logit = model.forward(token_input, state_input, prefix_input)  # [S, V, S]
+            # Expand current sequence across all states — works even when T == 0
+            token_input = tokens.unsqueeze(0).expand(S, -1)  # [S, T]
+            state_input = state_indices  # [S]
+            prefix_input = prefix.expand(S, -1, -1)  # [S, C, d_model]
 
-        # Select diagonal: P(token | state=s)
-        diag_logits = logit.permute(1, 0, 2).diagonal(dim1=1, dim2=2).T  # [S, V]
+            logit = model.forward(token_input, state_input, prefix_input)  # [S, V, S]
 
-        # Combine across states using provided weights
-        probs = (diag_logits.softmax(dim=-1) * state_weights_tensor[:, None]).sum(
-            dim=0
-        )  # [V]
+            # Select diagonal: P(token | state=s)
+            diag_logits = logit.permute(1, 0, 2).diagonal(dim1=1, dim2=2).T  # [S, V]
 
-        # Sample next token
-        next_token = torch.multinomial(probs, num_samples=1).item()
-        tokens = torch.cat([tokens, torch.tensor([next_token], device=device)])
+            # Combine across states using provided weights
+            probs = (diag_logits.softmax(dim=-1) * state_weights_tensor[:, None]).sum(
+                dim=0
+            )  # [V]
 
-        if next_token == stop_token:
-            break
+            # Sample next token
+            next_token = torch.multinomial(probs, num_samples=1).item()
+            tokens = torch.cat([tokens, torch.tensor([next_token], device=device)])
 
-    return tokens
+            if next_token == stop_token:
+                break
+
+        return tokens
