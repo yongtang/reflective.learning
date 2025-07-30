@@ -22,9 +22,9 @@ action_space = [
 facing_space = ["right", "down", "left", "up"]
 
 
-def f_observation(env_size, steps):
+def f_observation(env_size, max_steps):
     env = minigrid.envs.EmptyEnv(
-        size=env_size, max_steps=steps, render_mode=None
+        size=env_size, max_steps=max_steps, render_mode=None
     )  # disable truncation
     env.reset()
 
@@ -33,7 +33,7 @@ def f_observation(env_size, steps):
     action = []
 
     try:
-        for _ in range(steps):
+        for _ in range(max_steps):
             step = random.choice(action_space)
             env.step(step)
             action.append(step.name)
@@ -44,9 +44,9 @@ def f_observation(env_size, steps):
     return goal, start, facing, action
 
 
-def f_verify(env_size, goal, start, facing, action):
+def f_verify(env_size, max_steps, goal, start, facing, action):
     env = minigrid.envs.EmptyEnv(
-        size=env_size, max_steps=0, render_mode=None
+        size=env_size, max_steps=max_steps, render_mode=None
     )  # disable truncation
     env.reset()
 
@@ -67,8 +67,8 @@ def f_verify(env_size, goal, start, facing, action):
     return len(action) + 1  # did not reach goal
 
 
-def f_render(env_size, goal, start, facing):
-    env = minigrid.envs.EmptyEnv(size=env_size, max_steps=0, render_mode="rgb_array")
+def f_render(env_size, max_steps, goal, start, facing):
+    env = minigrid.envs.EmptyEnv(size=env_size, max_steps=max_steps, render_mode="rgb_array")
     env.reset()
 
     # Set agent position and direction
@@ -112,14 +112,14 @@ def f_model(info):
     return model
 
 
-def f_entry(env_size, goal, start, facing, action, image):
+def f_entry(env_size, max_steps, goal, start, facing, action, image):
     filename = f"env_{env_size}_goal_{goal[0]}_{goal[1]}_start_{start[0]}_{start[1]}_facing_{facing}.png"
     if not os.path.exists(os.path.join(image, filename)):
         os.makedirs(image, exist_ok=True)
-        img = f_render(env_size, goal, start, facing)
+        img = f_render(env_size, max_steps, goal, start, facing)
         PIL.Image.fromarray(img).save(os.path.join(image, filename))
 
-    state = f_verify(env_size, goal, start, facing, action)
+    state = f_verify(env_size, max_steps, goal, start, facing, action)
 
     return {
         "text": [
@@ -184,7 +184,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
             while count < num_seeds:
                 iteration += 1
                 steps = random.randint(1, max_steps)
-                goal, start, facing, action = f_observation(env_size, steps)
+                goal, start, facing, action = f_observation(env_size, max_steps=steps)
 
                 if list(goal) == list(start):
                     continue  # skip invalid seed
@@ -274,6 +274,7 @@ def run_spin(seed, data, image, max_steps):
                         json.dumps(
                             f_entry(
                                 env_size,
+                                max_steps,
                                 entry["goal"],
                                 entry["start"],
                                 entry["facing"],
