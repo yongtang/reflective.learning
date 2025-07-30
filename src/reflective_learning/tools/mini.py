@@ -433,7 +433,8 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
     model = f_model(info).to(device)
 
-    model.load_state_dict(weight).to(device)
+    model.load_state_dict(weight)
+    model.to(device)
     print(f"Load model: {os.path.join(data, 'model.pt')}")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
