@@ -1,6 +1,7 @@
 import argparse
 import functools
 import json
+import operator
 import os
 import random
 
