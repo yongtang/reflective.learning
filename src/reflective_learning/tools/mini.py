@@ -490,6 +490,15 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
 
 def main():
+    def f_pair(value: str) -> tuple[int, int]:
+        try:
+            x, y = map(int, value.split(","))
+            return x, y
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"Value must be two integers (e.g. 3,4), got {value}"
+            )
+
     parser = argparse.ArgumentParser(description="MiniGrid Reflective Model CLI")
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
@@ -521,9 +530,9 @@ def main():
     play_parser = subparsers.add_parser("play", help="Perform mode")
     play_parser.add_argument("--info", required=True)
     play_parser.add_argument("--model", required=True)
-    play_parser.add_argument("--goal", required=True)
-    play_parser.add_argument("--start", required=True)
-    play_parser.add_argument("--facing", required=True)
+    play_parser.add_argument("--goal", type=f_pair, required=True)
+    play_parser.add_argument("--start", type=f_pair, required=True)
+    play_parser.add_argument("--facing", choices=facing_space, required=True)
     play_parser.add_argument("--device")
 
     args = parser.parse_args()
