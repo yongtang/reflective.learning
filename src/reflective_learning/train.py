@@ -64,6 +64,13 @@ def train(
             token_target = batch["token"].to(device)  # [B] — one token per example
             state_target = batch["state"].to(device)  # [B]
 
+            if count + embed.size(0) > total:
+                chunk = total - count
+                mask = mask[:chunk]
+                embed = embed[:chunk]
+                token_target = token_target[:chunk]
+                state_target = state_target[:chunk]
+
             # Forward pass (model returns logits at final position)
             logits = model.call(mask=mask, embed=embed)  # [B, V, S]
             loss = model.loss(logits, token_target, state_target)
