@@ -123,42 +123,29 @@ def f_entry(env_size, goal, start, facing, action, image):
 
     state = f_verify(env_size, goal, start, facing, action)
 
-    return json.dumps(
-        {
-            "text": [
-                f"goal {goal[0]},{goal[1]}",
-                f"start {start[0]},{start[1]}",
-                f"facing {facing}",
-            ],
-            "image": [filename],
-            "token": action,
-            "state": state,
-        },
-        sort_keys=True,
-    )
+    return {
+        "text": [
+            f"goal {goal[0]},{goal[1]}",
+            f"start {start[0]},{start[1]}",
+            f"facing {facing}",
+        ],
+        "image": [filename],
+        "token": action,
+        "state": state,
+    }
 
 
+@functools.lru_cache
 def f_line(model, encoder, image, line):
     entry = json.loads(line)
-    print("ENTRY: ", entry)
-    assert False
-    if "text" not in data or "image" not in data:
-        raise ValueError(f"'text' or 'image' does not exist: {data}")
-    if not isinstance(data["text"], list) or not isinstance(data["image"], list):
-        raise ValueError(f"'text' or 'image' is not a list: {data}")
-
-    data_token = [f_action(token) for token in data["token"]]
-    data_state = int(data["state"])
-
-    images = [os.path.join(save_image, image) for image in data["image"]]
-    prefix = encoder.encode(data["text"], images)
-
-    # Pad or truncate token sequence
-    padded = (data_token + [0] * max_seq_len)[:max_seq_len]
-    token = torch.tensor(padded, dtype=torch.long)
-
-    # Repeat state ID across sequence
-    state = torch.tensor(data_state, dtype=torch.long)
+    token = torch.tensor(
+        [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]], dtype=torch.long
+    )
+    print("TOKEN: ", token)
+    state = torch.tensor(entry["state"], dtype=torch.long)
+    prefix = encoder.encode(
+        entry["text"], [os.path.join(image, e) for e in entry["image"]]
+    )
 
     return {
         "token": token,
@@ -191,7 +178,7 @@ class IterableDataset(torch.utils.data.IterableDataset):
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     iteration = 0
-    with open(save_seed, "wb") as f:
+    with open(save_seed, "w") as f:
         with tqdm(
             total=num_seeds, desc="Seed", dynamic_ncols=True, unit=" seed"
         ) as progress:
@@ -237,11 +224,11 @@ def run_spin(seed, data, image, max_steps):
 
         return False
 
-    with open(seed, "rb") as f:
+    with open(seed, "r") as f:
         fail = list(filter(f_fail, f))
         assert len(fail) == 0, f"invalid seed:\n  {'  '.join(fail)}"
 
-    with open(seed, "rb") as f:
+    with open(seed, "r") as f:
         env_size = {json.loads(line)["env"] for line in f if line.strip()}
         assert len(env_size) == 1
     env_size = next(iter(env_size))
@@ -276,11 +263,11 @@ def run_spin(seed, data, image, max_steps):
     os.makedirs(data, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(data, "model.pt"))
 
-    with open(os.path.join(data, "info.json"), "wb") as f:
+    with open(os.path.join(data, "info.json"), "w") as f:
         f.write(json.dumps(info))
 
-    with open(os.path.join(data, "seed.data"), "wb") as f:
-        with open(seed, "rb") as g:
+    with open(os.path.join(data, "seed.data"), "w") as f:
+        with open(seed, "r") as g:
             for line in g:
                 if line.strip():
                     entry = json.loads(line)
@@ -294,7 +281,8 @@ def run_spin(seed, data, image, max_steps):
                                 entry["facing"],
                                 entry["action"][:max_steps],
                                 image,
-                            )
+                            ),
+                            sort_keys=True,
                         )
                         + "\n"
                     )
@@ -304,7 +292,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
     lr = 1e-3
 
-    with open(os.path.join(data, "info.json"), "rb") as f:
+    with open(os.path.join(data, "info.json"), "r") as f:
         info = json.loads(f.read())
     print(f"Load info: {json.dumps(info)}")
 
@@ -319,7 +307,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    with open(os.path.join(data, "seed.data"), "rb") as f:
+    with open(os.path.join(data, "seed.data"), "r") as f:
         off = 0
         offset = []
         for line in f:
@@ -328,12 +316,12 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
             off += len(line)
     seed_index = np.array(offset, dtype=np.int64)
 
-    with open(os.path.join(data, "stub.data"), "wb") as f:
+    with open(os.path.join(data, "stub.data"), "w") as f:
         pass
     stub_index = np.zeros(reservoir, dtype=np.int64)
 
-    with open(os.path.join(data, "seed.data"), "rb") as seed_file:
-        with open(os.path.join(data, "stub.data"), "rb") as stub_file:
+    with open(os.path.join(data, "seed.data"), "r") as seed_file:
+        with open(os.path.join(data, "stub.data"), "r") as stub_file:
 
             dataset = IterableDataset(
                 seed_file,
