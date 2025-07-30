@@ -204,6 +204,8 @@ def f_callback(encoder, image, env_size, max_steps, model, count):
     stub = json.dumps(f_entry(env_size, max_steps, goal, start, facing, action, image))
     print(f"Stub: {stub}")
 
+    stub_index[selection] = offset
+
 
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed_file, seed_index, stub_file, stub_index, chance, line_fn):
@@ -500,6 +502,15 @@ def main():
     learn_parser.add_argument("--save-interval", type=int, required=True)
     learn_parser.add_argument("--device")
 
+    # ---- perform mode ----
+    perform_parser = subparsers.add_parser("perform", help="Perform mode")
+    perform_parser.add_argument("--info", required=True)
+    perform_parser.add_argument("--model", required=True)
+    perform_parser.add_argument("--goal", required=True)
+    perform_parser.add_argument("--start", required=True)
+    perform_parser.add_argument("--facing", required=True)
+    perform_parser.add_argument("--device")
+
     args = parser.parse_args()
     print(f"Load args: {json.dumps(vars(args))}")
 
@@ -527,6 +538,14 @@ def main():
             batch=args.batch,
             reservoir=args.reservoir,
             save_interval=args.save_interval,
+            device=args.device,
+        )
+
+    elif args.mode == "perform":
+        run_perform(
+            data=args.data,
+            image=args.image,
+            total=args.total,
             device=args.device,
         )
 
