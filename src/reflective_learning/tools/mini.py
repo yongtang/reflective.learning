@@ -71,8 +71,6 @@ def f_render(env_size, goal, start, facing):
     env = minigrid.envs.EmptyEnv(size=env_size, max_steps=0, render_mode="rgb_array")
     env.reset()
 
-    print("PRINT: ", env_size, goal, start, facing)
-
     # Set agent position and direction
     env.agent_pos = list(start)
     env.agent_dir = facing_space.index(facing)
