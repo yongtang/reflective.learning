@@ -33,7 +33,7 @@ def f_observation(env_size, max_steps):
         random.randint(1, env.width - 2),
         random.randint(1, env.height - 2),
     )
-    env.agent_dir = random.randint(0, len(facing_space))
+    env.agent_dir = random.randint(0, len(facing_space) - 1)
     start = tuple(int(v) for v in env.agent_pos)
     facing = facing_space[env.agent_dir]
     action = []
