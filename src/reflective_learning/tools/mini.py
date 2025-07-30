@@ -171,7 +171,7 @@ def f_line(encoder, image, line):
     }
 
 
-def f_callback(encoder, image, env_size, max_steps, model, count):
+def f_callback(encoder, image, env_size, max_steps, device, model, count):
     # goal, start, facing
     while True:
         goal = random.randint(1, env_size - 1), random.randint(1, env_size - 1)
@@ -198,6 +198,7 @@ def f_callback(encoder, image, env_size, max_steps, model, count):
         state_weights=state_weights,
         stop_token=0,
         max_seq_len=max_steps,
+        device=device,
     )
     action = [minigrid.core.actions.Actions(e).name for e in token]
     print(f"Prediction: {token} {action}")
@@ -470,7 +471,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 save=data,
                 save_interval=save_interval,
                 callback=functools.partial(
-                    f_callback, encoder, image, info["env"], info["max"]
+                    f_callback, encoder, image, info["env"], info["max"], device
                 ),
                 callback_interval=1,
                 device=device,
