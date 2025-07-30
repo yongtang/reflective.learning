@@ -4,6 +4,7 @@ import json
 import operator
 import os
 import random
+import tempfile
 
 import minigrid
 import numpy as np
@@ -505,7 +506,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 def run_play(goal, start, facing, model, device):
 
     info, weight = operator.itemgetter("info", "weight")(
-        torch.load(os.path.join(data, "model.pt"), map_location="cpu")
+        torch.load(model, map_location="cpu")
     )
     print(f"Load info: {json.dumps(info)}")
 
@@ -513,14 +514,18 @@ def run_play(goal, start, facing, model, device):
 
     model = f_model(info).to(device)
 
-    model.load_state_dict(weight).to(device)
-    print(f"Load model: {os.path.join(data, 'model.pt')}")
+    model.load_state_dict(weight)
+    model.to(device)
+    print(f"Load model: ")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    action = f_inference(
-        encoder, model, image, goal, start, facing, env_size, max_steps, device
-    )
+    env_size, max_steps = info["env"], info["max"]
+
+    with tempfile.TemporaryDirectory() as image:
+        action = f_inference(
+            encoder, model, image, goal, start, facing, env_size, max_steps, device
+        )
 
     print(f"Play model: {action}")
 
