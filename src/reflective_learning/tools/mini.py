@@ -176,8 +176,8 @@ def f_callback(
 ):
     # goal, start, facing
     while True:
-        goal = random.randint(1, env_size - 1), random.randint(1, env_size - 1)
-        start = random.randint(1, env_size - 1), random.randint(1, env_size - 1)
+        goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
+        start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
         if goal != start:
             break
     facing = facing_space[random.randint(0, len(facing_space) - 1)]
