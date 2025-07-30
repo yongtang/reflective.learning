@@ -200,7 +200,7 @@ def f_callback(encoder, image, env_size, max_steps, device, model, count):
         max_seq_len=max_steps,
         device=device,
     )
-    action = [minigrid.core.actions.Actions(e).name for e in token]
+    action = [minigrid.core.actions.Actions(e.item()).name for e in token]
     print(f"Prediction: {token} {action}")
 
     stub = json.dumps(f_entry(env_size, max_steps, goal, start, facing, action, image))
