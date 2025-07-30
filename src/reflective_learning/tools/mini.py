@@ -152,36 +152,9 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
     }
 
 
-@functools.lru_cache
-def f_line(encoder, image, line):
-    entry = json.loads(line)
-    token = torch.tensor(
-        [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]],
-        dtype=torch.long,
-    )
-    state = torch.tensor(entry["state"], dtype=torch.long)
-    prefix = encoder.encode(
-        entry["text"], [os.path.join(image, e) for e in entry["image"]]
-    )
-
-    return {
-        "token": token,
-        "state": state,
-        "prefix": prefix,
-    }
-
-
-def f_callback(
-    encoder, image, data, stub_index, env_size, max_steps, device, model, count
+def f_inference(
+    encoder, model, image, goal, start, facing, env_size, max_steps, device
 ):
-    # goal, start, facing
-    while True:
-        goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-        start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-        if goal != start:
-            break
-    facing = facing_space[random.randint(0, len(facing_space) - 1)]
-
     filename = f_image(env_size, max_steps, goal, start, facing, image)
 
     prefix = encoder.encode(
@@ -203,7 +176,26 @@ def f_callback(
         device=device,
     )
     action = [minigrid.core.actions.Actions(e.item()).name for e in token]
-    print(f"Prediction: {token} {action}")
+
+    return action
+
+
+def f_callback(
+    encoder, image, data, stub_index, env_size, max_steps, device, model, count
+):
+    # goal, start, facing
+    while True:
+        goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
+        start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
+        if goal != start:
+            break
+    facing = facing_space[random.randint(0, len(facing_space) - 1)]
+
+    action = f_inference(
+        encoder, model, image, goal, start, facing, env_size, max_steps, device
+    )
+
+    print(f"Prediction: {action}")
 
     stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
     print(f"Stub: {stub}")
@@ -215,6 +207,25 @@ def f_callback(
 
     selection = np.random.randint(0, len(stub_index))
     stub_index[selection] = offset
+
+
+@functools.lru_cache
+def f_line(encoder, image, line):
+    entry = json.loads(line)
+    token = torch.tensor(
+        [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]],
+        dtype=torch.long,
+    )
+    state = torch.tensor(entry["state"], dtype=torch.long)
+    prefix = encoder.encode(
+        entry["text"], [os.path.join(image, e) for e in entry["image"]]
+    )
+
+    return {
+        "token": token,
+        "state": state,
+        "prefix": prefix,
+    }
 
 
 class IterableDataset(torch.utils.data.IterableDataset):
@@ -488,6 +499,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 device=device,
             )
 
+
 def run_play(goal, start, facing, model, device):
 
     info, weight = operator.itemgetter("info", "state")(
@@ -503,6 +515,12 @@ def run_play(goal, start, facing, model, device):
     print(f"Load model: {os.path.join(data, 'model.pt')}")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+
+    action = f_inference(
+        encoder, model, image, goal, start, facing, env_size, max_steps, device
+    )
+
+    print(f"Play model: {action}")
 
 
 def main():
