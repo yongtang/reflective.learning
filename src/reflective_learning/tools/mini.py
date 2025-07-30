@@ -139,7 +139,8 @@ def f_entry(env_size, goal, start, facing, action, image):
 def f_line(model, encoder, image, line):
     entry = json.loads(line)
     token = torch.tensor(
-        [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]], dtype=torch.long
+        [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]],
+        dtype=torch.long,
     )
     print("TOKEN: ", token)
     state = torch.tensor(entry["state"], dtype=torch.long)
