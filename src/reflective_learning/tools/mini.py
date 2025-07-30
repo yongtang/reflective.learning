@@ -213,7 +213,7 @@ def f_callback(
         offset = f.tell()
         f.write(json.dumps(stub) + "\n")
 
-    selection = np.random.choice(stub_index)
+    selection = np.random.randint(0, len(stub_index))
     stub_index[selection] = offset
 
 
