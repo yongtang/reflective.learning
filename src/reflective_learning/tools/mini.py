@@ -34,7 +34,7 @@ def f_observation(env_size, max_steps):
         random.randint(1, env.height - 2),
     )
     env.agent_dir = random.randint(0, len(facing_space) - 1)
-    start = tuple(int(v) for v in env.agent_pos)
+    start = tuple(int(e) for e in env.agent_pos)
     facing = facing_space[env.agent_dir]
     action = []
 
@@ -123,12 +123,17 @@ def f_model(info):
     return model
 
 
-def f_entry(env_size, max_steps, goal, start, facing, action, image):
+def f_image(env_size, max_steps, goal, start, facing, image):
     filename = f"env_{env_size}_goal_{goal[0]}_{goal[1]}_start_{start[0]}_{start[1]}_facing_{facing}.png"
     if not os.path.exists(os.path.join(image, filename)):
         os.makedirs(image, exist_ok=True)
         img = f_render(env_size, max_steps, goal, start, facing)
         PIL.Image.fromarray(img).save(os.path.join(image, filename))
+    return filename
+
+
+def f_entry(env_size, max_steps, goal, start, facing, action, image):
+    filename = f_image(env_size, max_steps, goal, start, facing, image)
 
     state = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
 
@@ -147,7 +152,7 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
 
 
 @functools.lru_cache
-def f_line(model, encoder, image, line):
+def f_line(encoder, image, line):
     entry = json.loads(line)
     token = torch.tensor(
         [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]],
@@ -165,8 +170,35 @@ def f_line(model, encoder, image, line):
     }
 
 
-def f_callback(model, count):
-    pass
+def f_callback(encoder, image, env_size, max_steps, model, count):
+    # goal, start, facing
+    while True:
+        goal = random.randint(1, env_size - 1), random.randint(1, env_size - 1)
+        start = random.randint(1, env_size - 1), random.randint(1, env_size - 1)
+        if goal != start:
+            break
+    facing = facing_space(random.randint(0, len(facing_space) - 1))
+
+    filename = f_image(env_size, max_steps, goal, start, facing, image)
+
+    prefix = encoder.encode(
+        [
+            f"goal {goal[0]},{goal[1]}",
+            f"start {start[0]},{start[1]}",
+            f"facing {facing}",
+        ],
+        [os.path.join(image, filename)],
+    )
+
+    state_weights = {}
+    tokens = sequence(
+        model=model,
+        prefix=prefix,
+        state_weights=state_weights,
+        stop_token=0,
+        max_seq_len=max_steps,
+    )
+    print(f"Prediction: {tokens}")
 
 
 class IterableDataset(torch.utils.data.IterableDataset):
@@ -413,7 +445,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 stub_file,
                 stub_index,
                 chance=0.5,
-                line_fn=functools.partial(f_line, model, encoder, image),
+                line_fn=functools.partial(f_line, encoder, image),
             )
             loader = torch.utils.data.DataLoader(
                 dataset,

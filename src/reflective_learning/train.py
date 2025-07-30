@@ -66,6 +66,7 @@ def train(
 
             if count + embed.size(0) > total:
                 chunk = total - count
+
                 mask = mask[:chunk]
                 embed = embed[:chunk]
                 token_target = token_target[:chunk]
