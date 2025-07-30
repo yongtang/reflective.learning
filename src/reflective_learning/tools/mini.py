@@ -124,8 +124,9 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
         img = f_render(env_size, max_steps, goal, start, facing)
         PIL.Image.fromarray(img).save(os.path.join(image, filename))
 
-    action = action[:max_steps]
-    state = f_verify(env_size, max_steps, goal, start, facing, action)
+    state = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
+
+    token = action[:state]
 
     return {
         "text": [
@@ -134,7 +135,7 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
             f"facing {facing}",
         ],
         "image": [filename],
-        "token": action,
+        "token": token,
         "state": state,
     }
 
