@@ -68,7 +68,9 @@ def f_verify(env_size, max_steps, goal, start, facing, action):
 
 
 def f_render(env_size, max_steps, goal, start, facing):
-    env = minigrid.envs.EmptyEnv(size=env_size, max_steps=max_steps, render_mode="rgb_array")
+    env = minigrid.envs.EmptyEnv(
+        size=env_size, max_steps=max_steps, render_mode="rgb_array"
+    )
     env.reset()
 
     # Set agent position and direction
@@ -175,10 +177,23 @@ class IterableDataset(torch.utils.data.IterableDataset):
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
+    count_width = len(str(num_seeds))
+    step_width = len(str(max_steps))
+    iteration_width = len(str(num_seeds * 2))  # allow room for retries
+    bar_format = (
+        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
+        f"{{n:{count_width}d}}/{{total:{count_width}d}} "
+        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+    )
+
     iteration = 0
     with open(save_seed, "w") as f:
         with tqdm(
-            total=num_seeds, desc="Seed", dynamic_ncols=True, unit=" seed"
+            total=num_seeds,
+            desc="Seed",
+            dynamic_ncols=True,
+            unit="seed",
+            bar_format=bar_format,
         ) as progress:
             count = 0
             while count < num_seeds:
@@ -198,7 +213,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
 
                 f.write(json.dumps(seed, sort_keys=True) + "\n")
                 progress.set_postfix_str(
-                    f"steps={steps:3d} saved={count+1:6d} iteration={iteration:6d}"
+                    f"steps={steps:{step_width}d} saved={count+1:{count_width}d} iteration={iteration:{iteration_width}d}"
                 )
                 progress.update(1)
                 count += 1
