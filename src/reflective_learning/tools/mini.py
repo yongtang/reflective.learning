@@ -142,7 +142,6 @@ def f_line(model, encoder, image, line):
         [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]],
         dtype=torch.long,
     )
-    print("TOKEN: ", token)
     state = torch.tensor(entry["state"], dtype=torch.long)
     prefix = encoder.encode(
         entry["text"], [os.path.join(image, e) for e in entry["image"]]
