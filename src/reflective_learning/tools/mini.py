@@ -11,6 +11,7 @@ import torch
 from tqdm import tqdm
 
 from reflective_learning.encoder import ContextEncoder
+from reflective_learning.inference import sequence
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import train
 
