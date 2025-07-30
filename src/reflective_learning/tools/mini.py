@@ -177,8 +177,8 @@ class IterableDataset(torch.utils.data.IterableDataset):
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
-    count_width = len(str(num_seeds))
     step_width = len(str(max_steps))
+    count_width = len(str(num_seeds))
     iteration_width = len(str(num_seeds * 2))  # allow room for retries
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
@@ -237,13 +237,43 @@ def run_spin(seed, data, image, max_steps):
 
         return False
 
+    total = 0
     with open(seed, "r") as f:
-        fail = list(filter(f_fail, f))
-        assert len(fail) == 0, f"invalid seed:\n  {'  '.join(fail)}"
+        with tqdm(
+            total=os.path.getsize(seed),
+            desc="Seed pos check",
+            unit="B",
+            unit_scale=True,
+            dynamic_ncols=True,
+        ) as progress:
+            for line in f:
+                if line.strip():
+                    total += 1
+                progress.update(len(line.encode("utf-8")))
+                if f_fail(line):
+                    raise AssertionError(f"invalid seed:\n  {line.strip()}")
 
+    total_width = len(str(total))
+    bar_format = (
+        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
+        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
+        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+    )
+
+    env_size = set()
     with open(seed, "r") as f:
-        env_size = {json.loads(line)["env"] for line in f if line.strip()}
-        assert len(env_size) == 1
+        with tqdm(
+            total=total,
+            desc="Seed env check",
+            dynamic_ncols=True,
+            bar_format=bar_format,
+            unit="seed",
+        ) as progress:
+            for line in f:
+                if line.strip():
+                    env_size.add(json.loads(line)["env"])
+                    progress.update(1)
+    assert len(env_size) == 1
     env_size = next(iter(env_size))
 
     info = {
