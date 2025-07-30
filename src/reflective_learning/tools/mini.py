@@ -191,14 +191,18 @@ def f_callback(encoder, image, env_size, max_steps, model, count):
     )
 
     state_weights = {}
-    tokens = sequence(
+    token = sequence(
         model=model,
         prefix=prefix,
         state_weights=state_weights,
         stop_token=0,
         max_seq_len=max_steps,
     )
-    print(f"Prediction: {tokens}")
+    action = [minigrid.core.actions.Actions(e).name for e in token]
+    print(f"Prediction: {token} {action}")
+
+    stub = json.dumps(f_entry(env_size, max_steps, goal, start, facing, action, image))
+    print(f"Stub: {stub}")
 
 
 class IterableDataset(torch.utils.data.IterableDataset):
@@ -279,7 +283,7 @@ def run_spin(seed, data, image, max_steps):
             return True
         if not (entry["facing"] in facing_space):
             return True
-        if not (all(e in [v.name for v in action_space] for e in entry["action"])):
+        if not (all(e in [o.name for o in action_space] for e in entry["action"])):
             return True
 
         return False
