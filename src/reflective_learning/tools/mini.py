@@ -191,7 +191,7 @@ def f_callback(encoder, image, env_size, max_steps, model, count):
         [os.path.join(image, filename)],
     )
 
-    state_weights = {}
+    state_weights = {e: 1.0 for e in range(max_steps + 2)}
     token = sequence(
         model=model,
         prefix=prefix,
