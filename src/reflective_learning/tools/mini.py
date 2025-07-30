@@ -546,9 +546,10 @@ def main():
 
     elif args.mode == "play":
         run_play(
-            data=args.data,
-            image=args.image,
-            total=args.total,
+            goal=args.goal,
+            start=args.start,
+            facing=args.facing,
+            model=args.model,
             device=args.device,
         )
 
