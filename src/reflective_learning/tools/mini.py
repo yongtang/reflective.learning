@@ -241,7 +241,7 @@ def run_spin(seed, data, image, max_steps):
     with open(seed, "r") as f:
         with tqdm(
             total=os.path.getsize(seed),
-            desc="Seed pos check",
+            desc="Seed pos",
             unit="B",
             unit_scale=True,
             dynamic_ncols=True,
@@ -264,15 +264,17 @@ def run_spin(seed, data, image, max_steps):
     with open(seed, "r") as f:
         with tqdm(
             total=total,
-            desc="Seed env check",
+            desc="Seed env",
             dynamic_ncols=True,
             bar_format=bar_format,
             unit="seed",
         ) as progress:
             for line in f:
                 if line.strip():
-                    env_size.add(json.loads(line)["env"])
                     progress.update(1)
+
+                    env_size.add(json.loads(line)["env"])
+
     assert len(env_size) == 1
     env_size = next(iter(env_size))
 
@@ -306,30 +308,44 @@ def run_spin(seed, data, image, max_steps):
     os.makedirs(data, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(data, "model.pt"))
 
+    print(f"Save file: {os.path.join(data, 'model.pt')}")
+
     with open(os.path.join(data, "info.json"), "w") as f:
         f.write(json.dumps(info))
 
+    print(f"Save info: {json.dumps(info)}")
+
     with open(os.path.join(data, "seed.data"), "w") as f:
         with open(seed, "r") as g:
-            for line in g:
-                if line.strip():
-                    entry = json.loads(line)
+            with tqdm(
+                total=total,
+                desc="Seed spin",
+                dynamic_ncols=True,
+                bar_format=bar_format,
+                unit="seed",
+            ) as progress:
 
-                    f.write(
-                        json.dumps(
-                            f_entry(
-                                env_size,
-                                max_steps,
-                                entry["goal"],
-                                entry["start"],
-                                entry["facing"],
-                                entry["action"][:max_steps],
-                                image,
-                            ),
-                            sort_keys=True,
+                for line in g:
+                    if line.strip():
+                        progress.update(1)
+
+                        entry = json.loads(line)
+
+                        f.write(
+                            json.dumps(
+                                f_entry(
+                                    env_size,
+                                    max_steps,
+                                    entry["goal"],
+                                    entry["start"],
+                                    entry["facing"],
+                                    entry["action"][:max_steps],
+                                    image,
+                                ),
+                                sort_keys=True,
+                            )
+                            + "\n"
                         )
-                        + "\n"
-                    )
 
 
 def run_learn(data, image, total, batch, reservoir, save_interval, device):
