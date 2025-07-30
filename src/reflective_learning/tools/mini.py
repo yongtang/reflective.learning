@@ -424,7 +424,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
     lr = 1e-3
 
-    info, weight = operator.itemgetter("info", "state")(
+    info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
     )
     print(f"Load info: {json.dumps(info)}")
@@ -503,7 +503,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
 def run_play(goal, start, facing, model, device):
 
-    info, weight = operator.itemgetter("info", "state")(
+    info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
     )
     print(f"Load info: {json.dumps(info)}")
