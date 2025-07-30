@@ -55,7 +55,7 @@ def f_verify(env_size, max_steps, goal, start, facing, action):
 
     try:
         if tuple(env.agent_pos) == goal:
-            return 1  # reached without any steps
+            return 0  # reached without any steps
 
         for i, step in enumerate(action):
             env.step(getattr(minigrid.core.actions.Actions, step))
@@ -64,7 +64,7 @@ def f_verify(env_size, max_steps, goal, start, facing, action):
     finally:
         env.close()
 
-    return len(action) + 1  # did not reach goal
+    return max_steps + 1  # did not reach goal
 
 
 def f_render(env_size, max_steps, goal, start, facing):
@@ -72,6 +72,9 @@ def f_render(env_size, max_steps, goal, start, facing):
         size=env_size, max_steps=max_steps, render_mode="rgb_array"
     )
     env.reset()
+
+    # Clear any objects from the grid
+    env.grid = env._gen_grid(env_size, env_size)[0]  # regenerate an empty grid
 
     # Set agent position and direction
     env.agent_pos = list(start)
