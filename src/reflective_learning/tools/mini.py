@@ -369,14 +369,11 @@ def run_spin(seed, data, image, max_steps):
     model = f_model(info)
 
     os.makedirs(data, exist_ok=True)
-    torch.save(model.state_dict(), os.path.join(data, "model.pt"))
+    torch.save(
+        {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
+    )
 
     print(f"Save model: {os.path.join(data, 'model.pt')}")
-
-    with open(os.path.join(data, "info.json"), "w") as f:
-        f.write(json.dumps(info))
-
-    print(f"Save info: {json.dumps(info)}")
 
     with open(os.path.join(data, "seed.data"), "w") as f:
         with open(seed, "r") as g:
@@ -415,17 +412,16 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
 
     lr = 1e-3
 
-    with open(os.path.join(data, "info.json"), "r") as f:
-        info = json.loads(f.read())
+    info, weight = operator.itemgetter("info", "state")(
+        torch.load(os.path.join(data, "model.pt"), map_location="cpu")
+    )
     print(f"Load info: {json.dumps(info)}")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
     model = f_model(info).to(device)
 
-    model.load_state_dict(
-        torch.load(os.path.join(data, "model.pt"), map_location=device)
-    )
+    model.load_state_dict(weight).to(device)
     print(f"Load model: {os.path.join(data, 'model.pt')}")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
