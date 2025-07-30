@@ -564,7 +564,6 @@ def main():
 
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Perform mode")
-    play_parser.add_argument("--info", required=True)
     play_parser.add_argument("--model", required=True)
     play_parser.add_argument("--goal", type=f_pair, required=True)
     play_parser.add_argument("--start", type=f_pair, required=True)
