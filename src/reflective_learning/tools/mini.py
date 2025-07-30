@@ -177,7 +177,7 @@ def f_callback(encoder, image, env_size, max_steps, model, count):
         start = random.randint(1, env_size - 1), random.randint(1, env_size - 1)
         if goal != start:
             break
-    facing = facing_space(random.randint(0, len(facing_space) - 1))
+    facing = facing_space[random.randint(0, len(facing_space) - 1)]
 
     filename = f_image(env_size, max_steps, goal, start, facing, image)
 
