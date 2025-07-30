@@ -468,7 +468,9 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 total=total,
                 save=data,
                 save_interval=save_interval,
-                callback=f_callback,
+                callback=functools.partial(
+                    f_callback, encoder, image, info["env"], info["max"]
+                ),
                 callback_interval=1,
                 device=device,
             )
