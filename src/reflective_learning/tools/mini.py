@@ -505,14 +505,14 @@ def main():
     learn_parser.add_argument("--save-interval", type=int, required=True)
     learn_parser.add_argument("--device")
 
-    # ---- perform mode ----
-    perform_parser = subparsers.add_parser("perform", help="Perform mode")
-    perform_parser.add_argument("--info", required=True)
-    perform_parser.add_argument("--model", required=True)
-    perform_parser.add_argument("--goal", required=True)
-    perform_parser.add_argument("--start", required=True)
-    perform_parser.add_argument("--facing", required=True)
-    perform_parser.add_argument("--device")
+    # ---- play mode ----
+    play_parser = subparsers.add_parser("play", help="Perform mode")
+    play_parser.add_argument("--info", required=True)
+    play_parser.add_argument("--model", required=True)
+    play_parser.add_argument("--goal", required=True)
+    play_parser.add_argument("--start", required=True)
+    play_parser.add_argument("--facing", required=True)
+    play_parser.add_argument("--device")
 
     args = parser.parse_args()
     print(f"Load args: {json.dumps(vars(args))}")
@@ -544,8 +544,8 @@ def main():
             device=args.device,
         )
 
-    elif args.mode == "perform":
-        run_perform(
+    elif args.mode == "play":
+        run_play(
             data=args.data,
             image=args.image,
             total=args.total,
