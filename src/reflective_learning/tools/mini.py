@@ -488,6 +488,22 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 device=device,
             )
 
+def run_play(goal, start, facing, model, device):
+
+    info, weight = operator.itemgetter("info", "state")(
+        torch.load(os.path.join(data, "model.pt"), map_location="cpu")
+    )
+    print(f"Load info: {json.dumps(info)}")
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    model = f_model(info).to(device)
+
+    model.load_state_dict(weight).to(device)
+    print(f"Load model: {os.path.join(data, 'model.pt')}")
+
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+
 
 def main():
     def f_pair(value: str) -> tuple[int, int]:
