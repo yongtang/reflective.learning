@@ -247,11 +247,11 @@ def run_spin(seed, data, image, max_steps):
             dynamic_ncols=True,
         ) as progress:
             for line in f:
+                progress.update(len(line.encode("utf-8")))
                 if line.strip():
                     total += 1
-                progress.update(len(line.encode("utf-8")))
-                if f_fail(line):
-                    raise AssertionError(f"invalid seed:\n  {line.strip()}")
+                    if f_fail(line):
+                        raise AssertionError(f"invalid seed:\n  {line.strip()}")
 
     total_width = len(str(total))
     bar_format = (
@@ -308,7 +308,7 @@ def run_spin(seed, data, image, max_steps):
     os.makedirs(data, exist_ok=True)
     torch.save(model.state_dict(), os.path.join(data, "model.pt"))
 
-    print(f"Save file: {os.path.join(data, 'model.pt')}")
+    print(f"Save model: {os.path.join(data, 'model.pt')}")
 
     with open(os.path.join(data, "info.json"), "w") as f:
         f.write(json.dumps(info))
@@ -368,17 +368,26 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     with open(os.path.join(data, "seed.data"), "r") as f:
-        off = 0
-        offset = []
-        for line in f:
-            if line.strip():
-                offset.append(off)
-            off += len(line)
+        with tqdm(
+            total=os.path.getsize(os.path.join(data, "seed.data")),
+            desc="Seed index",
+            unit="B",
+            unit_scale=True,
+            dynamic_ncols=True,
+        ) as progress:
+            off = 0
+            offset = []
+            for line in f:
+                progress.update(len(line.encode("utf-8")))
+                if line.strip():
+                    offset.append(off)
+                off += len(line)
     seed_index = np.array(offset, dtype=np.int64)
 
     with open(os.path.join(data, "stub.data"), "w") as f:
         pass
     stub_index = np.zeros(reservoir, dtype=np.int64)
+    print(f"Stub index: {os.path.join(data, 'stub.data')}")
 
     with open(os.path.join(data, "seed.data"), "r") as seed_file:
         with open(os.path.join(data, "stub.data"), "r") as stub_file:
