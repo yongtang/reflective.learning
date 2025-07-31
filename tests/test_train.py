@@ -49,11 +49,12 @@ def test_train_sanity():
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-
     tmpdir = tempfile.mkdtemp()
+
     def f_callback(model, progress):
         with open(os.path.join(tmpdir, "model.pt"), "w") as f:
             pass
+
     try:
         train(
             model=model,

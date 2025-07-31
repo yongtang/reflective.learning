@@ -220,7 +220,7 @@ def f_callback(
         with open(os.path.join(data, "stub.data"), "a") as f:
             f.seek(0, os.SEEK_END)
             offset = f.tell()
-            f.write(json.dumps(stub) + "\n")
+            f.write(json.dumps(stub, sort_keys=True) + "\n")
 
         selection = np.random.randint(0, len(stub_index))
         stub_index[selection] = offset
@@ -250,7 +250,7 @@ def f_callback(
     return
 
 
-@functools.lru_cache
+@functools.lru_cache(maxsize=4096)
 def f_line(encoder, image, line):
     entry = json.loads(line)
     token = torch.tensor(
@@ -477,7 +477,7 @@ def run_learn(
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
     )
-    print(f"Load info: {json.dumps(info)}")
+    print(f"Load info: {json.dumps(info, sort_keys=True)}")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -554,7 +554,7 @@ def run_play(goal, start, facing, model, device):
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(model, map_location="cpu")
     )
-    print(f"Load info: {json.dumps(info)}")
+    print(f"Load info: {json.dumps(info, sort_keys=True)}")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -624,7 +624,7 @@ def main():
     play_parser.add_argument("--device")
 
     args = parser.parse_args()
-    print(f"Load args: {json.dumps(vars(args))}")
+    print(f"Load args: {json.dumps(vars(args), sort_keys=True)}")
 
     if args.mode == "seed":
         run_seed(
