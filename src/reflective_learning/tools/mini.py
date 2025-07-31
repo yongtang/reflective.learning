@@ -168,7 +168,7 @@ def f_inference(
         [os.path.join(image, filename)],
     )
 
-    state_weights = {e: 1.0 for e in range(max_steps + 2)}
+    state_weights = {e: float(max_steps - 1 - e) for e in range(max_steps + 2)}
     token = sequence(
         model=model,
         prefix=prefix,
