@@ -288,7 +288,7 @@ class IterableDataset(torch.utils.data.IterableDataset):
             file.seek(offset)
             line = file.readline()
             if line.strip():
-                yield self.line_fn(line)
+                yield self.line_fn(line=line)
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
