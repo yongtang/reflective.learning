@@ -11,7 +11,7 @@ def train(
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     total: int,
-    callback: Callable[[ReflectiveCore, tqdm], None],
+    callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
     device: Optional[torch.device] = None,
 ):
     """
@@ -82,7 +82,7 @@ def train(
             )
 
             if callback:
-                callback(model=model, progress=progress)
+                callback(model=model, progress=progress, device=device)
 
             if count >= total:
                 break

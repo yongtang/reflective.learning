@@ -193,6 +193,7 @@ def f_callback(
     encoder,
     model,
     progress,
+    device,
 ):
     if not hasattr(progress, "_meta_stub_"):
         progress._meta_stub_ = 0
@@ -212,7 +213,15 @@ def f_callback(
         facing = facing_space[random.randint(0, len(facing_space) - 1)]
 
         action = f_inference(
-            encoder, model, image, goal, start, facing, env_size, max_steps, device
+            encoder=encoder,
+            model=model,
+            image=image,
+            goal=goal,
+            start=start,
+            facing=facing,
+            env_size=env_size,
+            max_steps=max_steps,
+            device=device,
         )
 
         stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
