@@ -594,9 +594,9 @@ def run_play(goal, start, facing, model, device):
         action = f_inference(
             encoder, model, image, goal, start, facing, env_size, max_steps, device
         )
-
-    print(f"Play model: {action}")
-
+    state = f_verify(env_size, max_steps, goal, start, facing, action)
+ 
+    print(f"Play model: (state) {action}")
 
 def main():
     def f_pair(value: str) -> tuple[int, int]:
