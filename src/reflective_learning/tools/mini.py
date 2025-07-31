@@ -542,7 +542,7 @@ def run_learn(
                     image=image,
                     stub_batch=stub_batch,
                     stub_interval=stub_interval,
-                    save_interval=save_interal,
+                    save_interval=save_interval,
                     encoder=encoder,
                 ),
                 device=device,
