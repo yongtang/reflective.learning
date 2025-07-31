@@ -282,6 +282,15 @@ def f_line(encoder, image, line):
     }
 
 
+@functools.lru_cache(maxsize=4096)
+def f_file(file, offset):
+    if offset >= 0:
+        file.seek(offset)
+        line = file.readline()
+        return line.strip()
+    return None
+
+
 class IterableDataset(torch.utils.data.IterableDataset):
     def __init__(self, seed_file, seed_index, stub_file, stub_index, chance, line_fn):
         super().__init__()
@@ -298,9 +307,8 @@ class IterableDataset(torch.utils.data.IterableDataset):
                 selection = self.stub
             file, index = selection
             offset = np.random.choice(index)
-            file.seek(offset)
-            line = file.readline()
-            if line.strip():
+            line = f_file(fle, offset)
+            if line:
                 yield self.line_fn(line=line)
 
 
@@ -521,7 +529,7 @@ def run_learn(
 
     with open(os.path.join(data, "stub.data"), "w") as f:
         pass
-    stub_index = np.zeros(reservoir, dtype=np.int64)
+    stub_index = np.full(reservoir, -1, dtype=np.int64)
     print(f"Stub index: {os.path.join(data, 'stub.data')}")
 
     with open(os.path.join(data, "seed.data"), "r") as seed_file:
