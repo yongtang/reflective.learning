@@ -202,38 +202,41 @@ def f_callback(
         progress._meta_save_ = 0
 
     if progress.n > progress._meta_stub_ + stub_interval:
-        # env_size, max_steps
-        env_size, max_steps = info["env"], info["max"]
+        for _ in range(stub_batch):
+            # env_size, max_steps
+            env_size, max_steps = info["env"], info["max"]
 
-        # goal, start, facing
-        while True:
-            goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-            start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-            if goal != start:
-                break
-        facing = facing_space[random.randint(0, len(facing_space) - 1)]
+            # goal, start, facing
+            while True:
+                goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
+                start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
+                if goal != start:
+                    break
+            facing = facing_space[random.randint(0, len(facing_space) - 1)]
 
-        action = f_inference(
-            encoder=encoder,
-            model=model,
-            image=image,
-            goal=goal,
-            start=start,
-            facing=facing,
-            env_size=env_size,
-            max_steps=max_steps,
-            device=device,
-        )
+            action = f_inference(
+                encoder=encoder,
+                model=model,
+                image=image,
+                goal=goal,
+                start=start,
+                facing=facing,
+                env_size=env_size,
+                max_steps=max_steps,
+                device=device,
+            )
 
-        stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
+            stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
 
-        with open(os.path.join(data, "stub.data"), "a") as f:
-            f.seek(0, os.SEEK_END)
-            offset = f.tell()
-            f.write(json.dumps(stub, sort_keys=True) + "\n")
+            with open(os.path.join(data, "stub.data"), "a") as f:
+                f.seek(0, os.SEEK_END)
+                offset = f.tell()
+                f.write(json.dumps(stub, sort_keys=True) + "\n")
 
-        selection = np.random.randint(0, len(stub_index))
-        stub_index[selection] = offset
+            selection = np.random.randint(0, len(stub_index))
+            stub_index[selection] = offset
+
+        progress._meta_stub_ += stub_interval
 
     if (
         progress.n > progress._meta_save_ + save_interval
