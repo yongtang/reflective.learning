@@ -307,7 +307,7 @@ class IterableDataset(torch.utils.data.IterableDataset):
                 selection = self.stub
             file, index = selection
             offset = np.random.choice(index)
-            line = f_file(fle, offset)
+            line = f_file(file=file, offset=offset)
             if line:
                 yield self.line_fn(line=line)
 
