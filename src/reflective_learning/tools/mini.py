@@ -1,4 +1,5 @@
 import argparse
+import shutil
 import functools
 import json
 import operator
@@ -10,7 +11,7 @@ import minigrid
 import numpy as np
 import PIL.Image
 import torch
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from reflective_learning.encoder import ContextEncoder
 from reflective_learning.inference import sequence
@@ -183,32 +184,67 @@ def f_inference(
 
 
 def f_callback(
-    encoder, image, data, stub_index, env_size, max_steps, device, model, count
+    info,
+    data,
+    image,
+    stub_batch,
+    stub_interval,
+    save_interval,
+    encoder,
+    model,
+    progress,
 ):
-    # goal, start, facing
-    while True:
-        goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-        start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-        if goal != start:
-            break
-    facing = facing_space[random.randint(0, len(facing_space) - 1)]
+    if not hasattr(progress, "_meta_stub_"):
+        progress._meta_stub_ = 0
+    if not hasattr(progress, "_meta_save_"):
+        progress._meta_save_ = 0
 
-    action = f_inference(
-        encoder, model, image, goal, start, facing, env_size, max_steps, device
-    )
+    if progress.n > progress._meta_stub_ + stub_interval:
+        # goal, start, facing
+        while True:
+            goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
+            start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
+            if goal != start:
+                break
+        facing = facing_space[random.randint(0, len(facing_space) - 1)]
 
-    print(f"Prediction: {action}")
+        action = f_inference(
+            encoder, model, image, goal, start, facing, env_size, max_steps, device
+        )
 
-    stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
-    print(f"Stub: {stub}")
+        stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
 
-    with open(os.path.join(data, "stub.data"), "a") as f:
-        f.seek(0, os.SEEK_END)
-        offset = f.tell()
-        f.write(json.dumps(stub) + "\n")
+        with open(os.path.join(data, "stub.data"), "a") as f:
+            f.seek(0, os.SEEK_END)
+            offset = f.tell()
+            f.write(json.dumps(stub) + "\n")
 
-    selection = np.random.randint(0, len(stub_index))
-    stub_index[selection] = offset
+        selection = np.random.randint(0, len(stub_index))
+        stub_index[selection] = offset
+
+    if (
+        progress.n > progress._meta_save_ + save_interval
+        or progress.n == progress.total
+    ):
+        # keep copy of max_version = 3
+        max_version = 3
+        for i in reversed(range(1, max_version)):
+            src = os.path.join(data, f"model_{i}.pt")
+            dst = os.path.join(data, f"model_{i+1}.pt")
+            if os.path.exists(src):
+                shutil.move(src, dst)
+
+        # model.pt => model_1.pt
+        shutil.move(os.path.join(data, "model.pt"), os.path.join(data, "model_1.pt"))
+
+        # save model
+        torch.save(
+            {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
+        )
+
+        progress._meta_save_ += save_interval
+
+    return
 
 
 @functools.lru_cache
@@ -421,7 +457,17 @@ def run_spin(seed, data, image, max_steps):
                         )
 
 
-def run_learn(data, image, total, batch, reservoir, save_interval, device):
+def run_learn(
+    data,
+    image,
+    total,
+    batch,
+    reservoir,
+    stub_batch,
+    stub_interval,
+    save_interval,
+    device,
+):
 
     lr = 1e-3
 
@@ -471,7 +517,7 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
                 stub_file,
                 stub_index,
                 chance=0.5,
-                line_fn=functools.partial(f_line, encoder, image),
+                line_fn=functools.partial(f_line, encoder=encoder, image=image),
             )
             loader = torch.utils.data.DataLoader(
                 dataset,
@@ -482,24 +528,20 @@ def run_learn(data, image, total, batch, reservoir, save_interval, device):
             optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
             train(
-                info=info,
                 model=model,
                 loader=loader,
                 optimizer=optimizer,
                 total=total,
-                save=data,
-                save_interval=save_interval,
                 callback=functools.partial(
                     f_callback,
-                    encoder,
-                    image,
-                    data,
-                    stub_index,
-                    info["env"],
-                    info["max"],
-                    device,
+                    info=info,
+                    data=data,
+                    image=image,
+                    stub_batch=stub_batch,
+                    stub_interval=stub_interval,
+                    save_interval=save_interal,
+                    encoder=encoder,
                 ),
-                callback_interval=1,
                 device=device,
             )
 
@@ -565,6 +607,8 @@ def main():
     learn_parser.add_argument("--total", type=int, required=True)
     learn_parser.add_argument("--batch", type=int, required=True)
     learn_parser.add_argument("--reservoir", type=int, required=True)
+    learn_parser.add_argument("--stub-batch", type=int, required=True)
+    learn_parser.add_argument("--stub-interval", type=int, required=True)
     learn_parser.add_argument("--save-interval", type=int, required=True)
     learn_parser.add_argument("--device")
 
@@ -602,6 +646,8 @@ def main():
             total=args.total,
             batch=args.batch,
             reservoir=args.reservoir,
+            stub_batch=args.stub_batch,
+            stub_interval=args.stub_interval,
             save_interval=args.save_interval,
             device=args.device,
         )
