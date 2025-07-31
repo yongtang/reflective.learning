@@ -1,10 +1,10 @@
 import argparse
-import shutil
 import functools
 import json
 import operator
 import os
 import random
+import shutil
 import tempfile
 
 import minigrid
@@ -200,6 +200,9 @@ def f_callback(
         progress._meta_save_ = 0
 
     if progress.n > progress._meta_stub_ + stub_interval:
+        # env_size, max_steps
+        env_size, max_steps = info["env"], info["max"]
+
         # goal, start, facing
         while True:
             goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)

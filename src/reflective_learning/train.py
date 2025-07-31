@@ -1,5 +1,4 @@
-import os
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import torch
 from tqdm.auto import tqdm
@@ -82,7 +81,8 @@ def train(
                 f"loss={loss_value:{loss_width}.4f}  samples={count:{sample_width}d}"
             )
 
-            callback(model=model, progress=progress)
+            if callback:
+                callback(model=model, progress=progress)
 
             if count >= total:
                 break
