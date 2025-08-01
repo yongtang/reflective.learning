@@ -490,10 +490,9 @@ def run_learn(
     stub_batch,
     stub_interval,
     save_interval,
+    lr,
     device,
 ):
-
-    lr = 1e-3
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
@@ -595,6 +594,7 @@ def run_play(goal, start, facing, model, device):
             encoder, model, image, goal, start, facing, env_size, max_steps, device
         )
     state = f_verify(env_size, max_steps, goal, start, facing, action)
+    action = action[state]
 
     print(f"Play model: ({state}) {action}")
 
@@ -636,6 +636,7 @@ def main():
     learn_parser.add_argument("--stub-batch", type=int, required=True)
     learn_parser.add_argument("--stub-interval", type=int, required=True)
     learn_parser.add_argument("--save-interval", type=int, required=True)
+    learn_parser.add_argument("--lr", type=float, required=True)
     learn_parser.add_argument("--device")
 
     # ---- play mode ----
@@ -675,6 +676,7 @@ def main():
             stub_batch=args.stub_batch,
             stub_interval=args.stub_interval,
             save_interval=args.save_interval,
+            lr=args.lr,
             device=args.device,
         )
 
