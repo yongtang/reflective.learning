@@ -1,7 +1,7 @@
 from typing import Callable, Optional
 
 import torch
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from reflective_learning.model import ReflectiveCore
 
@@ -26,7 +26,7 @@ def train(
         device: Optional device override (defaults to CUDA if available).
     """
 
-    loss_width = 7
+    loss_width = 10
     sample_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
@@ -52,20 +52,20 @@ def train(
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L, L]
             embed = batch["embed"].to(device)  # [B, L, d_model]
-            token_target = batch["token"].to(device)  # [B] — one token per example
-            state_target = batch["state"].to(device)  # [B]
+            token_label = batch["token"].to(device)  # [B] — one token per example
+            state_label = batch["state"].to(device)  # [B]
 
             if count + embed.size(0) > total:
                 chunk = total - count
 
                 mask = mask[:chunk]
                 embed = embed[:chunk]
-                token_target = token_target[:chunk]
-                state_target = state_target[:chunk]
+                token_label = token_label[:chunk]
+                state_label = state_label[:chunk]
 
-            # Forward pass (model returns logits at final position)
-            logits = model.call(mask=mask, embed=embed)  # [B, V, S]
-            loss = model.loss(logits, token_target, state_target)
+            # Forward pass (model returns logit at final position)
+            logit = model.call(mask=mask, embed=embed)  # [B, V, S]
+            loss = model.loss(logit, token_label, state_label)
             loss_value = loss.item()
 
             # Backpropagation
@@ -78,7 +78,7 @@ def train(
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix_str(
-                f"loss={loss_value:{loss_width}.4f}  samples={count:{sample_width}d}"
+                f"loss={loss_value:{loss_width}.2e}  samples={count:{sample_width}d}"
             )
 
             if callback:

@@ -10,8 +10,8 @@ def test_reflective_transformer_forward_and_loss():
     max_prefix_len = 6
     batch_size = 2
 
-    decoder = torch.nn.TransformerDecoder(
-        torch.nn.TransformerDecoderLayer(
+    decoder = torch.nn.TransformerEncoder(
+        torch.nn.TransformerEncoderLayer(
             d_model=64,
             nhead=4,
             dim_feedforward=256,
@@ -37,7 +37,7 @@ def test_reflective_transformer_forward_and_loss():
     input = token[:, :-1]  # [B, T-1]
     label = token[:, -1]  # [B]
 
-    logit = model(input, state, prefix=prefix)  # [B, 1, V, S]
+    logit = model(token=input, prefix=prefix)  # [B, 1, V, S]
     assert logit.shape == (batch_size, vocab_size, state_size)
 
     loss = model.loss(logit, label, state)  # [B] target

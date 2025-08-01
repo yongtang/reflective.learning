@@ -5,8 +5,8 @@ from src.reflective_learning.model import ReflectiveCore
 
 
 def make_dummy_model():
-    decoder = torch.nn.TransformerDecoder(
-        torch.nn.TransformerDecoderLayer(
+    decoder = torch.nn.TransformerEncoder(
+        torch.nn.TransformerEncoderLayer(
             d_model=16,
             nhead=2,
             dim_feedforward=32,
@@ -26,23 +26,22 @@ def make_dummy_model():
 def test_sequence():
     model = make_dummy_model()
     prefix = torch.randn(4, 16)  # [C, d_model]
-    state_weights = {0: 0.7, 1: 0.3}
-    stop_token = 0
-    max_seq_len = 10
+    weights = torch.tensor([0.7, 0.3])  # [S]
+    maximum = 10
 
     tokens = sequence(
         model=model,
         prefix=prefix,
-        state_weights=state_weights,
-        stop_token=stop_token,
-        max_seq_len=max_seq_len,
+        weights=weights,
+        maximum=maximum,
         device="cpu",
     )
 
     # Updated assertions for torch.Tensor return type
+    tokens = tokens.squeeze(0)
     assert isinstance(tokens, torch.Tensor)
     assert tokens.shape[0] > 0
-    if stop_token in tokens:
-        assert (tokens == stop_token).nonzero(as_tuple=False)[0].item() < max_seq_len
+    if 0 in tokens:
+        assert (tokens == 0).nonzero(as_tuple=False)[0].item() < maximum
     else:
-        assert tokens.shape[0] <= max_seq_len
+        assert tokens.shape[0] <= maximum
