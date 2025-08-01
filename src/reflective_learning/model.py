@@ -170,9 +170,10 @@ class ReflectiveCore(nn.Module):
             x = torch.cat([prefix, x], dim=0)  # [C+T-1, D]
             embed.append(x)
 
+            assert False
+
             L = max(L, x.size(0))
 
-            assert False
             # Construct causal attention mask for [L, L]
             causal_mask = torch.triu(
                 torch.ones((L, L), device=device), diagonal=1
@@ -192,9 +193,11 @@ class ReflectiveCore(nn.Module):
             padded_embed[i, :L] = embeds[i]
             padded_mask[i, :L, :L] = masks[i]
 
+        assert False
+
         return {
             "mask": padded_mask,  # [B, L, L]
             "embed": padded_embed,  # [B, L, d_model]
-            "token": torch.stack(token_targets),  # [B]
-            "state": torch.stack(state_targets),  # [B]
+            "token": torch.stack(token_label),  # [B]
+            "state": torch.stack(state_label),  # [B]
         }
