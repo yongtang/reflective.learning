@@ -4,10 +4,10 @@ import torch
 def sequence(
     model,
     prefix: torch.Tensor,
-    state_weights: dict,
+    weights: dict,
     stop_token: int,
     max_seq_len: int,
-    device: str = "cpu",
+    device: torch.device,
 ) -> torch.Tensor:
     """
     Generate a single token sequence using a fixed prefix and state-weighted sampling.
@@ -18,7 +18,7 @@ def sequence(
         state_weights (dict): Mapping from state index to probability.
         stop_token (int): Token that terminates generation.
         max_seq_len (int): Maximum number of tokens to generate.
-        device (str): Device for computation.
+        device (device): Device for computation.
 
     Returns:
         Tensor: [T] of generated token indices.
@@ -32,10 +32,16 @@ def sequence(
         prefix = prefix.unsqueeze(0).to(device)  # [1, C, d_model]
 
         # Prepare state indices and normalized weights
-        state_indices = torch.arange(S, device=device)  # [S]
-        weight_list = [state_weights[s.item()] for s in state_indices]
-        state_weights_tensor = torch.tensor(weight_list, device=device)
-        state_weights_tensor = state_weights_tensor / state_weights_tensor.sum()
+        indices = torch.arange(S, device=device)  # [S]
+        weights = [weights[e.item()] for e in indices]
+        weights = torch.tensor(weights, device=device)
+        weights = weights / weights.sum()
+
+        token = torch.empty(0, dtype=torch.long, device=device)  # []
+        for length in range(max_seq_len):
+            token_input = tokens.unsqueeze(0).expand(S, -1)  # [S, T]
+            state_input = state_indices  # [S]
+            prefix_input = prefix.expand(S, -1, -1)  # [S, C, d_model]
 
         tokens = torch.empty(0, dtype=torch.long, device=device)  # [T]
 
