@@ -6,7 +6,6 @@ def sequence(
     prefix: torch.Tensor,
     weights: dict,
     maximum: int,
-    stop: int,
     device: torch.device,
 ) -> torch.Tensor:
     """
@@ -17,7 +16,6 @@ def sequence(
         prefix (Tensor): [B, C, D] prefix embedding.
         weights (dict): Mapping from state index to probability.
         maximum (int): Maximum number of tokens to generate.
-        stop (int): Token that terminates generation.
         device (device): Device for computation.
 
     Returns:
@@ -39,7 +37,7 @@ def sequence(
 
         token = torch.empty(0, dtype=torch.long, device=device)  # []
         for length in range(maximum):
-            logit = model.forward(token, prefix_input)  # [B, V, S]
+            logit = model.forward(token, prefix)  # [B, V, S]
 
             # Softmax over class dimension S to get prob: [B, V, S]
             probs = F.softmax(logit, dim=2)  # [B, V, S]
@@ -55,7 +53,7 @@ def sequence(
 
             token = torch.cat([token, prediction])
 
-            if (token == stop).any(dim=1).all().item():
+            if (token == 0).any(dim=1).all().item():
                 break
 
         return tokens
