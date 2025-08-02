@@ -270,7 +270,7 @@ def f_callback(
     return
 
 
-@functools.lru_cache(maxsize=4096)
+#@functools.lru_cache(maxsize=4096)
 def f_line(info, encoder, image, line):
     print("LINE --- ", line)
     entry = json.loads(line)
