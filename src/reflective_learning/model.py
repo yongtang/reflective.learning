@@ -79,7 +79,12 @@ class ReflectiveCore(nn.Module):
             [B, V, S] logit at final position
         """
         B, L, _ = embed.shape
+
+        print("MASK / EMBED SHAPE: ", mask.shape, embed.shape)
+
+
         assert False
+
         # Expand [B, L, L] → [B * head, L, L] as required by PyTorch
         head = self.decoder.layers[0].self_attn.num_heads
         mask = mask.unsqueeze(1).expand(B, head, L, L).reshape(B * head, L, L)
