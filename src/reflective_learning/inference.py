@@ -44,17 +44,17 @@ def sequence(
             probs = torch.nn.functional.softmax(logit, dim=2)  # [B, V, S]
 
             # Compute expected utility of each action, weights: [S] -> [1, 1, S] to broadcast
-            prob = torch.einsum("bvs,s->bv", probs, weights)  # shape [B, V]
+            probs = torch.einsum("bvs,s->bv", probs, weights)  # shape [B, V]
 
             # Normalize over actions
             probs = probs / probs.sum(dim=1, keepdim=True)  # shape [B, V]
 
             # Sample one action per batch item
-            prediction = torch.multinomial(probs, num_samples=1).squeeze(1)  # shape [B]
+            prediction = torch.multinomial(probs, num_samples=1)  # shape [B]
 
-            token = torch.cat([token, prediction])
+            token = torch.cat([token, prediction], dim=1)
 
             if (token == 0).any(dim=1).all().item():
                 break
 
-        return tokens
+        return token

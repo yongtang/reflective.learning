@@ -84,7 +84,6 @@ class ReflectiveCore(nn.Module):
         if mask is None:
             mask = torch.ones((B, T), dtype=torch.bool, device=embed.device)
 
-
         # Positional embedding
         pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
         x = embed + self.pos_embedding(pos)  # [B, T, D]
