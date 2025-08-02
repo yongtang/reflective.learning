@@ -28,6 +28,7 @@ def sequence(
         V = model.vocab_size
         S = model.state_size
         prefix = prefix.reshape(-1, prefix.shape[-2], prefix.shape[-1])  # [B, C, D]
+        B = prefix.size(0)
 
         # Prepare state indices and normalized weights
         indices = torch.arange(S, device=device)  # [S]
@@ -35,12 +36,12 @@ def sequence(
         weights = torch.tensor(weights, device=device)
         weights = weights / weights.sum()
 
-        token = torch.empty(0, dtype=torch.long, device=device)  # []
+        token = torch.empty([B, 0], dtype=torch.long, device=device)  # [B, 0]
         for length in range(maximum):
             logit = model.forward(token, prefix)  # [B, V, S]
 
             # Softmax over class dimension S to get prob: [B, V, S]
-            probs = F.softmax(logit, dim=2)  # [B, V, S]
+            probs = torch.nn.functional.softmax(logit, dim=2)  # [B, V, S]
 
             # Compute expected utility of each action, weights: [S] -> [1, 1, S] to broadcast
             prob = torch.einsum("bvs,s->bv", probs, weights)  # shape [B, V]
