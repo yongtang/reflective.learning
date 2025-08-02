@@ -185,8 +185,6 @@ def f_inference(
         ],
         [os.path.join(image, filename)],
     )
-    B = prefix.size(0)
-    assert B == 1, f"prefix: "{prefix.shape}""
 
     token = sequence(
         model=model,
@@ -195,7 +193,8 @@ def f_inference(
         maximum=max_steps,
         device=device,
     )
-    assert token.size(0) == prefix.size(0)
+    B = token.size(0)
+    assert B == 1, f"token: {token.shape}"
 
     action = token.squeeze(0).tolist()
     action = action[: action.index(0)] if 0 in action else action
