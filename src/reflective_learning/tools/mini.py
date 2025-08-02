@@ -196,7 +196,7 @@ def f_inference(
 
     symbol = {v: k for k, v in vocab.items()}
     action = [
-        symbol[entry[: entry.index(0)]] if 0 in entry else entry
+        [symbol[e] for e in entry[: entry.index(0)]] if 0 in entry else entry
         for entry in token.tolist()
     ]
 
