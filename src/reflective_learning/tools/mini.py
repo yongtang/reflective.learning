@@ -163,7 +163,17 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
 
 
 def f_inference(
-    encoder, model, image, goal, start, facing, env_size, max_steps, weights, device
+    encoder,
+    model,
+    image,
+    goal,
+    start,
+    facing,
+    env_size,
+    max_steps,
+    vocab,
+    weights,
+    device,
 ):
     filename = f_image(env_size, max_steps, goal, start, facing, image)
 
@@ -183,7 +193,12 @@ def f_inference(
         maximum=max_steps,
         device=device,
     )
-    action = [minigrid.core.actions.Actions(e.item()).name for e in token]
+
+    symbol = {v: k for k, v in vocab.items()}
+    action = [
+        symbol[entry[: entry.index(0)]] if 0 in entry else entry
+        for entry in token.tolist()
+    ]
 
     return action
 
@@ -228,6 +243,7 @@ def f_callback(
                 facing=facing,
                 env_size=env_size,
                 max_steps=max_steps,
+                vocab=vocab,
                 weights=weights,
                 device=device,
             )
@@ -615,16 +631,17 @@ def run_play(goal, start, facing, model, device):
 
     with tempfile.TemporaryDirectory() as image:
         action = f_inference(
-            encoder,
-            model,
-            image,
-            goal,
-            start,
-            facing,
-            env_size,
-            max_steps,
-            weights,
-            device,
+            encoder=encoder,
+            model=model,
+            image=image,
+            goal=goal,
+            start=start,
+            facing=facing,
+            env_size=env_size,
+            max_steps=max_steps,
+            vocab=vocab,
+            weights=weights,
+            device=device,
         )
     step = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
     token = action[:step]
