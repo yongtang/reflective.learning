@@ -26,6 +26,12 @@ action_space = [
 facing_space = ["right", "down", "left", "up"]
 
 
+def f_step(step, max_steps):
+    assert step, f"invalid step {step}"
+
+    return f"done:{step}" if step <= max_steps else f"fail:{max_steps}"
+
+
 def f_observation(env_size, max_steps):
     env = minigrid.envs.EmptyEnv(
         size=env_size, max_steps=max_steps, render_mode=None
@@ -139,9 +145,10 @@ def f_image(env_size, max_steps, goal, start, facing, image):
 def f_entry(env_size, max_steps, goal, start, facing, action, image):
     filename = f_image(env_size, max_steps, goal, start, facing, image)
 
-    state = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
+    step = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
 
-    token = action[:state]
+    token = action[:step]
+    state = f_step(step)
 
     return {
         "text": [
@@ -264,17 +271,17 @@ def f_callback(
 
 
 @functools.lru_cache(maxsize=4096)
-def f_line(encoder, image, line):
+def f_line(info, encoder, image, line):
     entry = json.loads(line)
 
-    print("ENTRY: LINE: ", entry)
-    assert False
-
     token = torch.tensor(
-        [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]],
+        [info["vocab"][e] for e in entry["token"]],
         dtype=torch.long,
     )
-    state = torch.tensor(entry["state"], dtype=torch.long)
+    state = torch.tensor(
+        [info["state"][e] for e in entry["state"]],
+        dtype=torch.long,
+    )
     prefix = encoder.encode(
         entry["text"], [os.path.join(image, e) for e in entry["image"]]
     )
@@ -422,10 +429,7 @@ def run_spin(seed, data, image, max_steps):
         "env": env_size,
         "max": max_steps,
         "vocab": {e.name: action_space.index(e) + 1 for e in action_space},
-        "state": {
-            **{f"done:{i}": i - 1 for i in range(1, max_steps + 1)},
-            f"fail:{max_steps}": max_steps,
-        },
+        "state": {f_step(e) for e in range(1, max_steps + 1 + 1)},
         "layer": {
             "d_model": 768,
             "nhead": 12,
@@ -549,7 +553,9 @@ def run_learn(
                 stub_file,
                 stub_index,
                 chance=0.5,
-                line_fn=functools.partial(f_line, encoder=encoder, image=image),
+                line_fn=functools.partial(
+                    f_line, info=info, encoder=encoder, image=image
+                ),
             )
             loader = torch.utils.data.DataLoader(
                 dataset,
