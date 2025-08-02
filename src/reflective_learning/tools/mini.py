@@ -162,19 +162,7 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
     }
 
 
-def f_inference(
-    encoder,
-    model,
-    image,
-    goal,
-    start,
-    facing,
-    env_size,
-    max_steps,
-    vocab,
-    weights,
-    device,
-):
+def f_prefix(goal, start, facing, env_size, max_steps, encoder, image):
     filename = f_image(env_size, max_steps, goal, start, facing, image)
 
     prefix = encoder.encode(
@@ -185,6 +173,24 @@ def f_inference(
         ],
         [os.path.join(image, filename)],
     )
+    return prefix
+
+
+def f_inference(
+    model,
+    vocab,
+    weights,
+    prefix,
+    device,
+):
+    def f(token):
+        action = token.squeeze(0).tolist()
+        action = action[: action.index(0)] if 0 in action else action
+
+        symbol = {v: k for k, v in vocab.items()}
+        action = [symbol[e] for e in action]
+
+        return action
 
     token = sequence(
         model=model,
@@ -193,16 +199,8 @@ def f_inference(
         maximum=max_steps,
         device=device,
     )
-    B = token.size(0)
-    assert B == 1, f"token: {token.shape}"
 
-    action = token.squeeze(0).tolist()
-    action = action[: action.index(0)] if 0 in action else action
-
-    symbol = {v: k for k, v in vocab.items()}
-    action = [symbol[e] for e in action]
-
-    return action
+    return [f(e) for e in token] if prefix.dim() == 3 else f(token)
 
 
 def f_callback(
@@ -224,9 +222,13 @@ def f_callback(
         progress._meta_save_ = 0
 
     if progress.n > progress._meta_stub_ + stub_interval:
-        for _ in range(stub_batch):
-            # env_size, max_steps
-            env_size, max_steps = info["env"], info["max"]
+
+        # env_size, max_steps
+        env_size, max_steps = info["env"], info["max"]
+
+        prefix = list()
+
+        for i in range(stub_batch):
 
             # goal, start, facing
             while True:
@@ -236,21 +238,38 @@ def f_callback(
                     break
             facing = facing_space[random.randint(0, len(facing_space) - 1)]
 
-            action = f_inference(
-                encoder=encoder,
-                model=model,
-                image=image,
+            prefix.append(
+                f_prefix(
+                    goal=goal,
+                    start=start,
+                    facing=facing,
+                    env_size=env_size,
+                    max_steps=max_steps,
+                    encoder=encoder,
+                    image=image,
+                )
+            )
+
+        prefix = torch.concatenate(prefix, dim=0)
+
+        action = f_inference(
+            model=model,
+            vocab=vocab,
+            weights=weights,
+            prefix=prefix,
+            device=device,
+        )
+
+        for i in range(stub_batch):
+            stub = f_entry(
+                env_size=env_size,
+                max_steps=max_steps,
                 goal=goal,
                 start=start,
                 facing=facing,
-                env_size=env_size,
-                max_steps=max_steps,
-                vocab=vocab,
-                weights=weights,
-                device=device,
+                action=action[i],
+                image=image,
             )
-
-            stub = f_entry(env_size, max_steps, goal, start, facing, action, image)
 
             with open(os.path.join(data, "stub.data"), "a") as f:
                 f.seek(0, os.SEEK_END)
@@ -493,13 +512,13 @@ def run_spin(seed, data, image, max_steps):
                         f.write(
                             json.dumps(
                                 f_entry(
-                                    env_size,
-                                    max_steps,
-                                    entry["goal"],
-                                    entry["start"],
-                                    entry["facing"],
-                                    entry["action"][:max_steps],
-                                    image,
+                                    env_size=env_size,
+                                    max_steps=max_steps,
+                                    goal=entry["goal"],
+                                    start=entry["start"],
+                                    facing=entry["facing"],
+                                    action=entry["action"][:max_steps],
+                                    image=image,
                                 ),
                                 sort_keys=True,
                             )
@@ -632,17 +651,21 @@ def run_play(goal, start, facing, model, device):
     weights = torch.nn.functional.normalize(weights, p=2, dim=0)
 
     with tempfile.TemporaryDirectory() as image:
-        action = f_inference(
-            encoder=encoder,
-            model=model,
-            image=image,
+        prefix = f_prefix(
             goal=goal,
             start=start,
             facing=facing,
             env_size=env_size,
             max_steps=max_steps,
+            encoder=encoder,
+            image=image,
+        )
+
+        action = f_inference(
+            model=model,
             vocab=vocab,
             weights=weights,
+            prefix=prefix,
             device=device,
         )
     step = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])

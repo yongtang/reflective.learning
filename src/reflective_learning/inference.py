@@ -27,8 +27,12 @@ def sequence(
 
         V = model.vocab_size
         S = model.state_size
+
         prefix = torch.as_tensor(prefix, dtype=torch.float32, device=device)
-        prefix = prefix.reshape(-1, prefix.shape[-2], prefix.shape[-1])  # [B, C, D]
+
+        dim = prefix.dim()
+
+        prefix = prefix.unsqueeze(0) if dim == 2 else prefix
         B = prefix.size(0)
 
         # Normalized weights
@@ -54,5 +58,7 @@ def sequence(
 
             if (token == 0).any(dim=1).all().item():
                 break
+
+        token = token.squeeze(0) if dim == 2 else token
 
         return token
