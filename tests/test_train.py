@@ -21,7 +21,7 @@ class DummyDataset(torch.utils.data.Dataset):
         T = 5
         return {
             "token": torch.randint(1, self.vocab_size, (T,)),  # [T]
-            "state": torch.randint(0, self.state_size, (1,)),  # [1]
+            "state": torch.randint(0, self.state_size, []),  # []
             "prefix": torch.randn(3, self.d_model),  # [C, d_model]
         }
 

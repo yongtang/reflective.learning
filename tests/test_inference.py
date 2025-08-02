@@ -26,16 +26,14 @@ def make_dummy_model():
 def test_sequence():
     model = make_dummy_model()
     prefix = torch.randn(4, 16)  # [C, d_model]
-    state_weights = {0: 0.7, 1: 0.3}
-    stop_token = 0
-    max_seq_len = 10
+    weights = {0: 0.7, 1: 0.3}
+    maximum = 10
 
     tokens = sequence(
         model=model,
         prefix=prefix,
-        state_weights=state_weights,
-        stop_token=stop_token,
-        max_seq_len=max_seq_len,
+        weights=weights,
+        maximum=maximum,
         device="cpu",
     )
 
