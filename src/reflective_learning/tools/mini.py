@@ -272,19 +272,24 @@ def f_callback(
 
 @functools.lru_cache(maxsize=4096)
 def f_line(info, encoder, image, line):
+    print("LINE --- ", line)
     entry = json.loads(line)
+    print("ENTRY --- ", entry)
 
     token = torch.tensor(
         [info["vocab"][e] for e in entry["token"]],
         dtype=torch.long,
     )
+    print("TOKEN --- ", token)
     state = torch.tensor(
         [info["state"][e] for e in entry["state"]],
         dtype=torch.long,
     )
+    print("STATE --- ", state)
     prefix = encoder.encode(
         entry["text"], [os.path.join(image, e) for e in entry["image"]]
     )
+    print("PREFIX --- ", prefix)
 
     return {
         "token": token,
