@@ -197,7 +197,7 @@ def f_inference(
         model=model,
         prefix=prefix,
         weights=weights,
-        maximum=max_steps,
+        maximum=maximum,
         device=device,
     )
 
