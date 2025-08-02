@@ -312,13 +312,14 @@ def f_callback(
 
 
 @functools.lru_cache(maxsize=4096)
-def f_line(vocab_fn, state_fn, encoder, image, line):
+def f_line(vocab_fn, state_fn, max_steps, encoder, image, line):
     entry = json.loads(line)
 
     token = torch.tensor(
-        [vocab_fn(e) for e in entry["token"]],
+        [vocab_fn(e) for e in entry["token"]] + [0],
         dtype=torch.long,
     )
+    token = token[:max_steps]
     state = torch.tensor(
         state_fn(entry["state"]),
         dtype=torch.long,
@@ -601,6 +602,7 @@ def run_learn(
                     f_line,
                     vocab_fn=lambda e: info["vocab"][e],
                     state_fn=lambda e: info["state"][e],
+                    max_steps=max_steps,
                     encoder=encoder,
                     image=image,
                 ),
