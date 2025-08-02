@@ -170,34 +170,23 @@ class ReflectiveCore(nn.Module):
             x = torch.cat([prefix, x], dim=0)  # [C+T-1, D]
             embed.append(x)
 
-            assert False
+        # Length of embed
+        count = torch.tensor([e.size(0) for e in embed], device=embed.device)
 
-            L = max(L, x.size(0))
+        # Pad to longest sequence with zeros
+        embed = torch.nn.utils.rnn.pad_sequence(
+            embed, batch_first=True
+        )  # [B, T, D] <= max(T)
 
-            # Construct causal attention mask for [L, L]
-            causal_mask = torch.triu(
-                torch.ones((L, L), device=device), diagonal=1
-            ).bool()
-            mask = torch.zeros((L, L), device=device)
-            mask.masked_fill_(causal_mask, float("-inf"))
-            masks.append(mask)
-
-        B = len(embeds)
-        padded_mask = torch.full(
-            (B, max_embed_len, max_embed_len), float("-inf"), device=device
-        )
-        padded_embed = torch.zeros((B, max_embed_len, d_model), device=device)
-
-        for i in range(B):
-            L = embeds[i].size(0)
-            padded_embed[i, :L] = embeds[i]
-            padded_mask[i, :L, :L] = masks[i]
-
-        assert False
+        # True for valid, False for padding
+        B, T = embed.size(0), embed.size(1)
+        mask = torch.arange(T, device=padded.device).expand(B, T) < count.unsqueeze(
+            1
+        )  # shape: [B, T]
 
         return {
-            "mask": padded_mask,  # [B, L, L]
-            "embed": padded_embed,  # [B, L, d_model]
+            "mask": padded_mask,  # [B, T]
+            "embed": padded_embed,  # [B, T, D]
             "token": torch.stack(token_label),  # [B]
             "state": torch.stack(state_label),  # [B]
         }
