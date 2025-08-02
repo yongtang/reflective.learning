@@ -227,6 +227,9 @@ def f_callback(
         # env_size, max_steps
         env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
+        weights = torch.tensor([1.0] * max_steps + [0.01])
+        weights = torch.nn.functional.normalize(weights, p=2, dim=0)
+
         prefix = list()
 
         for i in range(stub_batch):
