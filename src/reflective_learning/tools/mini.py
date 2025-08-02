@@ -377,7 +377,7 @@ def run_spin(seed, data, image, max_steps):
     with open(seed, "r") as f:
         with tqdm(
             total=os.path.getsize(seed),
-            desc="Seed pos",
+            desc="Seed check",
             unit="B",
             unit_scale=True,
             dynamic_ncols=True,
@@ -400,7 +400,7 @@ def run_spin(seed, data, image, max_steps):
     with open(seed, "r") as f:
         with tqdm(
             total=total,
-            desc="Seed env",
+            desc="Seed check",
             dynamic_ncols=True,
             bar_format=bar_format,
             unit="seed",
