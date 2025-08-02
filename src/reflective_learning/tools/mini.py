@@ -185,7 +185,7 @@ def f_inference(
         ],
         [os.path.join(image, filename)],
     )
-    B = token.size(0)
+    B = prefix.size(0)
     assert B == 1
 
     token = sequence(
