@@ -266,6 +266,10 @@ def f_callback(
 @functools.lru_cache(maxsize=4096)
 def f_line(encoder, image, line):
     entry = json.loads(line)
+
+    print("ENTRY: LINE: ", entry)
+    assert False
+
     token = torch.tensor(
         [getattr(minigrid.core.actions.Actions, e) for e in entry["token"]],
         dtype=torch.long,

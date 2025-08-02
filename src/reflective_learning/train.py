@@ -51,6 +51,8 @@ def train(
 
             print("XXXXXXX - ", batch["mask"].shape, batch["embed"].shape, batch["token"].shape, batch["state"].shape)
 
+            assert False
+
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L, L]
             embed = batch["embed"].to(device)  # [B, L, d_model]
