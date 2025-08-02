@@ -148,7 +148,7 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
     step = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
 
     token = action[:step]
-    state = f_step(step)
+    state = f_step(step=step, max_steps=max_steps)
 
     return {
         "text": [
@@ -429,7 +429,9 @@ def run_spin(seed, data, image, max_steps):
         "env": env_size,
         "max": max_steps,
         "vocab": {e.name: action_space.index(e) + 1 for e in action_space},
-        "state": {f_step(e) for e in range(1, max_steps + 1 + 1)},
+        "state": {
+            f_step(step=e, max_steps=max_steps) for e in range(1, max_steps + 1 + 1)
+        },
         "layer": {
             "d_model": 768,
             "nhead": 12,
