@@ -30,7 +30,7 @@ class ReflectiveCore(nn.Module):
         self.d_model = d_model
 
         # Project one-hot token × state to d_model
-        self.input_linear = nn.Linear(vocab_size * state_size, d_model)
+        self.input_linear = nn.Linear(vocab_size, d_model)
 
         # Output logit over joint token-state space
         self.output_linear = nn.Linear(d_model, vocab_size * state_size)

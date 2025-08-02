@@ -31,6 +31,7 @@ def f_step(step, max_steps):
 
     return f"done:{step}" if step <= max_steps else f"fail:{max_steps}"
 
+
 def f_observation(env_size, max_steps):
     env = minigrid.envs.EmptyEnv(
         size=env_size, max_steps=max_steps, render_mode=None
@@ -552,7 +553,6 @@ def run_learn(
     stub_index = np.full(reservoir, -1, dtype=np.int64)
     print(f"Stub index: {os.path.join(data, 'stub.data')}")
 
-
     with open(os.path.join(data, "seed.data"), "r") as seed_file:
         with open(os.path.join(data, "stub.data"), "r") as stub_file:
 
@@ -563,7 +563,11 @@ def run_learn(
                 stub_index,
                 chance=0.5,
                 line_fn=functools.partial(
-                    f_line, vocab_fn=lambda e: info["vocab"][e], state_fn=lambda e: info["state"][e], encoder=encoder, image=image
+                    f_line,
+                    vocab_fn=lambda e: info["vocab"][e],
+                    state_fn=lambda e: info["state"][e],
+                    encoder=encoder,
+                    image=image,
                 ),
             )
             loader = torch.utils.data.DataLoader(
