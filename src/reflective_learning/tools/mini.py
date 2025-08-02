@@ -185,6 +185,8 @@ def f_inference(
         ],
         [os.path.join(image, filename)],
     )
+    B = token.size(0)
+    assert B == 1
 
     token = sequence(
         model=model,
@@ -193,12 +195,13 @@ def f_inference(
         maximum=max_steps,
         device=device,
     )
+    assert token.size(0) == prefix.size(0)
+
+    action = token.squeeze(0).tolist()
+    action = action[: action.index(0)] if 0 in action else action
 
     symbol = {v: k for k, v in vocab.items()}
-    action = [
-        [symbol[e] for e in entry[: entry.index(0)]] if 0 in entry else entry
-        for entry in token.tolist()
-    ]
+    action = [symbol[e] for e in action]
 
     return action
 
