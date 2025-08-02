@@ -27,11 +27,15 @@ def sequence(
 
         V = model.vocab_size
         S = model.state_size
+        prefix = torch.tensor(prefix, device=device)
         prefix = prefix.reshape(-1, prefix.shape[-2], prefix.shape[-1])  # [B, C, D]
         B = prefix.size(0)
 
         # Normalized weights
-        weights = torch.nn.functional.normalize(weights, p=2, dim=0)  # [S]
+        weights = torch.tensor(weights, device=device)
+        weights = torch.nn.functional.normalize(
+            weights, p=2, dim=0, device=device
+        )  # [S]
 
         token = torch.empty([B, 0], dtype=torch.long, device=device)  # [B, 0]
         for length in range(maximum):
