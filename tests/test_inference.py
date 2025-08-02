@@ -26,7 +26,7 @@ def make_dummy_model():
 def test_sequence():
     model = make_dummy_model()
     prefix = torch.randn(4, 16)  # [C, d_model]
-    weights = torch.tensor([0.7, 0.3]) # [S]
+    weights = torch.tensor([0.7, 0.3])  # [S]
     maximum = 10
 
     tokens = sequence(

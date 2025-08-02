@@ -88,15 +88,11 @@ class ReflectiveCore(nn.Module):
         pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
         x = embed + self.pos_embedding(pos)  # [B, T, D]
 
-        print("SHAPE YYY --- ", T, B, embed.shape, pos.shape, x.shape, mask.shape)
-
         # Padding mask: [B, T], True = PAD — so invert `mask`
         src_key_padding_mask = ~mask
 
         # Causal mask: [T, T], True = masked
         mask = torch.triu(torch.ones(T, T, device=embed.device), diagonal=1).bool()
-
-        print("SHAPE XXX--- ", x.shape, mask.shape, src_key_padding_mask.shape)
 
         # Transformer: decoder-only via TransformerEncoder + causal mask
         x = self.decoder(

@@ -40,7 +40,6 @@ def sequence(
         weights = torch.nn.functional.normalize(weights, p=2, dim=0)  # [S]
         token = torch.empty([B, 0], dtype=torch.long, device=device)  # [B, 0]
         for length in range(maximum):
-            print("----  SHAPE - ", token.shape, weights.shape, prefix.shape)
             logit = model.forward(token, prefix)  # [B, V, S]
 
             # Softmax over class dimension S to get prob: [B, V, S]
