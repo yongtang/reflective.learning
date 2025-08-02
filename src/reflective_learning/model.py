@@ -94,6 +94,8 @@ class ReflectiveCore(nn.Module):
         # Causal mask: [T, T], True = masked
         mask = torch.triu(torch.ones(T, T, device=embed.device), diagonal=1).bool()
 
+        print("SHAPE XXX--- ", x.shape, mask.shape, src_key_padding_mask.shape)
+
         # Transformer: decoder-only via TransformerEncoder + causal mask
         x = self.decoder(
             src=x,
