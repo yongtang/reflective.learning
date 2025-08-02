@@ -33,10 +33,7 @@ def sequence(
 
         # Normalized weights
         weights = torch.tensor(weights, device=device)
-        weights = torch.nn.functional.normalize(
-            weights, p=2, dim=0, device=device
-        )  # [S]
-
+        weights = torch.nn.functional.normalize(weights, p=2, dim=0)  # [S]
         token = torch.empty([B, 0], dtype=torch.long, device=device)  # [B, 0]
         for length in range(maximum):
             logit = model.forward(token, prefix)  # [B, V, S]
