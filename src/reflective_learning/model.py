@@ -163,7 +163,7 @@ class ReflectiveCore(nn.Module):
             prefix = entry["prefix"].to(device)  # [C, D]
 
             T = token.size(0)
-            assert T > 1, "Sequence must have at least 1 token (to predict one step)"
+            assert T > 0, "Sequence must have at least 1 token (to predict one step)"
 
             token_label.append(token[-1])  # []
             state_label.append(state)  # []
