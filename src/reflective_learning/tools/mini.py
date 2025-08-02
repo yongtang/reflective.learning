@@ -103,9 +103,9 @@ def f_render(env_size, max_steps, goal, start, facing):
 
 
 def f_model(info):
-    vocab_size = len(action_space)
-    state_size = info["max"] + 2
-    max_seq_len = info["max"] + 2
+    vocab_size = 1 + len(action_space)
+    state_size = info["max"] + 1
+    max_seq_len = info["max"]
     max_prefix_len = 512
 
     decoder = torch.nn.TransformerDecoder(
@@ -579,11 +579,11 @@ def run_play(goal, start, facing, model, device):
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
+    print(f"Load model: {model}")
     model = f_model(info).to(device)
 
     model.load_state_dict(weight)
     model.to(device)
-    print(f"Load model: ")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
