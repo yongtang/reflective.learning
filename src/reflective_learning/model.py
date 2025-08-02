@@ -73,30 +73,37 @@ class ReflectiveCore(nn.Module):
         """
         Forward pass for precomputed embeddings.
         Args:
-            mask:  [B, L, L] causal attention mask (float mask with -inf or 0)
-            embed: [B, L, D]
+            mask:  [B, T]
+            embed: [B, T, D]
         Returns:
             [B, V, S] logit at final position
         """
-        B, L, _ = embed.shape
+        B, T, D = embed.shape
 
         print("MASK / EMBED SHAPE: ", mask.shape, embed.shape)
 
+        # Positional embedding
+        pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
+        x = embed + self.pos_embedding(pos)  # [B, T, D]
 
-        assert False
+        # Padding mask: [B, T], True = PAD — so invert `mask`
+        src_key_padding_mask = ~mask
 
-        # Expand [B, L, L] → [B * head, L, L] as required by PyTorch
-        head = self.decoder.layers[0].self_attn.num_heads
-        mask = mask.unsqueeze(1).expand(B, head, L, L).reshape(B * head, L, L)
+        # Causal mask: [T, T], True = masked
+        mask = torch.triu(torch.ones(T, T, device=embed.device), diagonal=1).bool()
 
-        # Add position embeddings
-        x = torch.arange(L, device=embed.device).unsqueeze(0).expand(B, L)
-        x = embed + self.pos_embedding(x)
+        # Transformer: decoder-only via TransformerEncoder + causal mask
+        x = self.decoder(
+            src=x,
+            mask=mask,
+            src_key_padding_mask=src_key_padding_mask,
+        )  # shape [B, T, D]
 
-        x = self.decoder(x, x, tgt_mask=mask)  # standard decoder call
-        logit = self.output_linear(x).view(B, L, V, S)
+        # Output projection to joint token-state logits
+        logit = self.output_linear(x)  # [B, T, V × S]
+        logit = logit.view(B, T, self.vocab_size, self.state_size)
 
-        return logit[:, -1]  # always return final position
+        return logit[:, -1]  # [B, V, S] — final token position
 
     def loss(
         self,
@@ -194,7 +201,13 @@ class ReflectiveCore(nn.Module):
             1
         )  # shape: [B, T]
 
-        print("SHAPE ----- ", mask.shape, embed.shape, torch.stack(token_label).shape, torch.stack(state_label).shape)
+        print(
+            "SHAPE ----- ",
+            mask.shape,
+            embed.shape,
+            torch.stack(token_label).shape,
+            torch.stack(state_label).shape,
+        )
 
         return {
             "mask": mask,  # [B, T]
