@@ -624,7 +624,7 @@ def run_play(goal, start, facing, model, device):
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    env_size, max_steps = info["env"], info["max"]
+    env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
     weights = torch.tensor([1.0] * max_steps + [0.01])
     weights = torch.nn.functional.normalize(weights, p=2, dim=0)
