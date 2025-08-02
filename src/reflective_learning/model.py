@@ -153,6 +153,11 @@ class ReflectiveCore(nn.Module):
         # max_len = 0
 
         for entry in batch:
+            print("ENTRY; COLLATE: -- ", entry)
+            print("ENTRY; COLLATE: -- ", entry["token"].shape)
+            print("ENTRY; COLLATE: -- ", entry["state"].shape)
+            print("ENTRY; COLLATE: -- ", entry["prefix"].shape)
+
             token = entry["token"].to(device)  # [T]
             state = entry["state"].to(device)  # []
             prefix = entry["prefix"].to(device)  # [C, D]
