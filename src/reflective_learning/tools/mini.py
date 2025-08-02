@@ -512,6 +512,7 @@ def run_learn(
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
     )
+    print("INFO: ", info)
     print(f"Load info: {json.dumps(info, sort_keys=True)}")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
