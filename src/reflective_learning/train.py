@@ -49,7 +49,13 @@ def train(
         for batch in loader:
             model.train()
 
-            print("XXXXXXX - ", batch["mask"].shape, batch["embed"].shape, batch["token"].shape, batch["state"].shape)
+            print(
+                "XXXXXXX - ",
+                batch["mask"].shape,
+                batch["embed"].shape,
+                batch["token"].shape,
+                batch["state"].shape,
+            )
 
             assert False
 

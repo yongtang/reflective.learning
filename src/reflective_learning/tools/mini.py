@@ -421,6 +421,11 @@ def run_spin(seed, data, image, max_steps):
     info = {
         "env": env_size,
         "max": max_steps,
+        "vocab": {e: action_space.index(e) + 1 for e in action_space},
+        "state": {
+            **{f"done:{i}": i - 1 for i in range(1, max_steps + 1)},
+            f"fail:{max_steps}": max_steps,
+        },
         "layer": {
             "d_model": 768,
             "nhead": 12,
