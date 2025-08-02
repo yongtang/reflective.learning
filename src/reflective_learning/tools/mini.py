@@ -186,7 +186,7 @@ def f_inference(
         [os.path.join(image, filename)],
     )
     B = prefix.size(0)
-    assert B == 1
+    assert B == 1, f"prefix: "{prefix.shape}""
 
     token = sequence(
         model=model,
