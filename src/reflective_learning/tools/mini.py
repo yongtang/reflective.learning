@@ -31,7 +31,6 @@ def f_step(step, max_steps):
 
     return f"done:{step}" if step <= max_steps else f"fail:{max_steps}"
 
-
 def f_observation(env_size, max_steps):
     env = minigrid.envs.EmptyEnv(
         size=env_size, max_steps=max_steps, render_mode=None
@@ -270,19 +269,19 @@ def f_callback(
     return
 
 
-# @functools.lru_cache(maxsize=4096)
-def f_line(info, encoder, image, line):
+@functools.lru_cache(maxsize=4096)
+def f_line(vocab_fn, state_fn, encoder, image, line):
     print("LINE --- ", line)
     entry = json.loads(line)
     print("ENTRY --- ", entry)
 
     token = torch.tensor(
-        [info["vocab"][e] for e in entry["token"]],
+        [vocab_fn(e) for e in entry["token"]],
         dtype=torch.long,
     )
     print("TOKEN --- ", token)
     state = torch.tensor(
-        info["state"][entry["state"]],
+        state_fn(entry["state"]),
         dtype=torch.long,
     )
     print("STATE --- ", state)
@@ -553,6 +552,7 @@ def run_learn(
     stub_index = np.full(reservoir, -1, dtype=np.int64)
     print(f"Stub index: {os.path.join(data, 'stub.data')}")
 
+
     with open(os.path.join(data, "seed.data"), "r") as seed_file:
         with open(os.path.join(data, "stub.data"), "r") as stub_file:
 
@@ -563,7 +563,7 @@ def run_learn(
                 stub_index,
                 chance=0.5,
                 line_fn=functools.partial(
-                    f_line, info=info, encoder=encoder, image=image
+                    f_line, vocab_fn=lambda e: info["vocab"][e], state_fn=lambda e: info["state"][e], encoder=encoder, image=image
                 ),
             )
             loader = torch.utils.data.DataLoader(
