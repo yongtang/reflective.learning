@@ -626,8 +626,9 @@ def run_play(goal, start, facing, model, device):
             weights,
             device,
         )
-    state = f_verify(env_size, max_steps, goal, start, facing, action)
-    action = action[state]
+    step = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
+    token = action[:step]
+    state = f_step(step=step, max_steps=max_steps)
 
     print(f"Play model: ({state}) {action}")
 
