@@ -456,7 +456,7 @@ def run_spin(seed, data, image, max_steps):
         with open(seed, "r") as g:
             with tqdm(
                 total=total,
-                desc="Seed spin",
+                desc="Spin",
                 dynamic_ncols=True,
                 bar_format=bar_format,
                 unit="seed",
