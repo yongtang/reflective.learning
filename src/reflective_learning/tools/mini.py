@@ -225,7 +225,7 @@ def f_callback(
     if progress.n > progress._meta_stub_ + stub_interval:
 
         # env_size, max_steps
-        env_size, max_steps = info["env"], info["max"]
+        env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
         prefix = list()
 
