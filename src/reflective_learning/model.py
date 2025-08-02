@@ -42,8 +42,8 @@ class ReflectiveCore(nn.Module):
 
     def forward(
         self,
-        token: torch.Tensor,  # [B, T] (T: token)
-        prefix: torch.Tensor,  # [B, C, D] (C: prefix, D: d_model)
+        token: torch.Tensor,  # [B, T]
+        prefix: torch.Tensor,  # [B, C, D]
         mask: torch.Tensor = None,
     ) -> torch.Tensor:
         """
@@ -79,7 +79,7 @@ class ReflectiveCore(nn.Module):
             [B, V, S] logit at final position
         """
         B, L, _ = embed.shape
-
+        assert False
         # Expand [B, L, L] → [B * head, L, L] as required by PyTorch
         head = self.decoder.layers[0].self_attn.num_heads
         mask = mask.unsqueeze(1).expand(B, head, L, L).reshape(B * head, L, L)

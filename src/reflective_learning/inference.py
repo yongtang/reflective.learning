@@ -5,19 +5,19 @@ def sequence(
     model,
     prefix: torch.Tensor,
     weights: dict,
-    stop_token: int,
-    max_seq_len: int,
+    maximum: int,
+    stop: int,
     device: torch.device,
 ) -> torch.Tensor:
     """
-    Generate a single token sequence using a fixed prefix and state-weighted sampling.
+    Generate a single token sequence using a fixed prefix and weighted sampling.
 
     Args:
         model: Trained ReflectiveCore model.
-        prefix (Tensor): [C, d_model] prefix embedding.
-        state_weights (dict): Mapping from state index to probability.
-        stop_token (int): Token that terminates generation.
-        max_seq_len (int): Maximum number of tokens to generate.
+        prefix (Tensor): [B, C, D] prefix embedding.
+        weights (dict): Mapping from state index to probability.
+        maximum (int): Maximum number of tokens to generate.
+        stop (int): Token that terminates generation.
         device (device): Device for computation.
 
     Returns:
@@ -29,7 +29,7 @@ def sequence(
 
         V = model.vocab_size
         S = model.state_size
-        prefix = prefix.unsqueeze(0).to(device)  # [1, C, d_model]
+        prefix = prefix.reshape(-1, prefix.shape[-2], prefix.shape[-1])  # [B, C, D]
 
         # Prepare state indices and normalized weights
         indices = torch.arange(S, device=device)  # [S]
@@ -38,36 +38,24 @@ def sequence(
         weights = weights / weights.sum()
 
         token = torch.empty(0, dtype=torch.long, device=device)  # []
-        for length in range(max_seq_len):
-            token_input = tokens.unsqueeze(0).expand(S, -1)  # [S, T]
-            state_input = state_indices  # [S]
-            prefix_input = prefix.expand(S, -1, -1)  # [S, C, d_model]
+        for length in range(maximum):
+            logit = model.forward(token, prefix_input)  # [B, V, S]
 
-        tokens = torch.empty(0, dtype=torch.long, device=device)  # [T]
+            # Softmax over class dimension S to get prob: [B, V, S]
+            probs = F.softmax(logit, dim=2)  # [B, V, S]
 
-        for _ in range(max_seq_len):
-            T = tokens.shape[0]
+            # Compute expected utility of each action, weights: [S] -> [1, 1, S] to broadcast
+            prob = torch.einsum("bvs,s->bv", probs, weights)  # shape [B, V]
 
-            # Expand current sequence across all states — works even when T == 0
-            token_input = tokens.unsqueeze(0).expand(S, -1)  # [S, T]
-            state_input = state_indices  # [S]
-            prefix_input = prefix.expand(S, -1, -1)  # [S, C, d_model]
+            # Normalize over actions
+            probs = probs / probs.sum(dim=1, keepdim=True)  # shape [B, V]
 
-            logit = model.forward(token_input, state_input, prefix_input)  # [S, V, S]
+            # Sample one action per batch item
+            prediction = torch.multinomial(probs, num_samples=1).squeeze(1)  # shape [B]
 
-            # Select diagonal: P(token | state=s)
-            diag_logits = logit.permute(1, 0, 2).diagonal(dim1=1, dim2=2).T  # [S, V]
+            token = torch.cat([token, prediction])
 
-            # Combine across states using provided weights
-            probs = (diag_logits.softmax(dim=-1) * state_weights_tensor[:, None]).sum(
-                dim=0
-            )  # [V]
-
-            # Sample next token
-            next_token = torch.multinomial(probs, num_samples=1).item()
-            tokens = torch.cat([tokens, torch.tensor([next_token], device=device)])
-
-            if next_token == stop_token:
+            if (token == stop).any(dim=1).all().item():
                 break
 
         return tokens
