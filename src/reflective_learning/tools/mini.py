@@ -11,7 +11,7 @@ import minigrid
 import numpy as np
 import PIL.Image
 import torch
-from tqdm.auto import tqdm
+from tqdm import tqdm
 
 from reflective_learning.encoder import ContextEncoder
 from reflective_learning.inference import sequence
