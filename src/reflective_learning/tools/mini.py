@@ -163,7 +163,7 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
 
 
 def f_inference(
-    encoder, model, image, goal, start, facing, env_size, max_steps, device
+    encoder, model, image, goal, start, facing, env_size, max_steps, weights, device
 ):
     filename = f_image(env_size, max_steps, goal, start, facing, image)
 
@@ -176,11 +176,10 @@ def f_inference(
         [os.path.join(image, filename)],
     )
 
-    state_weights = {e: float(max_steps - 1 - e) for e in range(max_steps + 2)}
     token = sequence(
         model=model,
         prefix=prefix,
-        state_weights=state_weights,
+        weights=weights,
         stop_token=0,
         max_seq_len=max_steps,
         device=device,
@@ -230,6 +229,7 @@ def f_callback(
                 facing=facing,
                 env_size=env_size,
                 max_steps=max_steps,
+                weights=weights,
                 device=device,
             )
 
@@ -611,9 +611,21 @@ def run_play(goal, start, facing, model, device):
 
     env_size, max_steps = info["env"], info["max"]
 
+    weights = torch.tensor([1.0] * max_steps + [0.01])
+    weights = torch.nn.functional.normalize(weights, p=2, dim=0)
+
     with tempfile.TemporaryDirectory() as image:
         action = f_inference(
-            encoder, model, image, goal, start, facing, env_size, max_steps, device
+            encoder,
+            model,
+            image,
+            goal,
+            start,
+            facing,
+            env_size,
+            max_steps,
+            weights,
+            device,
         )
     state = f_verify(env_size, max_steps, goal, start, facing, action)
     action = action[state]

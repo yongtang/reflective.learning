@@ -4,7 +4,7 @@ import torch
 def sequence(
     model,
     prefix: torch.Tensor,
-    weights: dict,
+    weights: torch.Tensor,
     maximum: int,
     device: torch.device,
 ) -> torch.Tensor:
@@ -14,7 +14,7 @@ def sequence(
     Args:
         model: Trained ReflectiveCore model.
         prefix (Tensor): [B, C, D] prefix embedding.
-        weights (dict): Mapping from state index to probability.
+        weights (Tensor): Mapping from state index to probability.
         maximum (int): Maximum number of tokens to generate.
         device (device): Device for computation.
 
@@ -30,11 +30,8 @@ def sequence(
         prefix = prefix.reshape(-1, prefix.shape[-2], prefix.shape[-1])  # [B, C, D]
         B = prefix.size(0)
 
-        # Prepare state indices and normalized weights
-        indices = torch.arange(S, device=device)  # [S]
-        weights = [weights[e.item()] for e in indices]
-        weights = torch.tensor(weights, device=device)
-        weights = weights / weights.sum()
+        # Normalized weights
+        weights = torch.nn.functional.normalize(weights, p=2, dim=0)  # [S]
 
         token = torch.empty([B, 0], dtype=torch.long, device=device)  # [B, 0]
         for length in range(maximum):
