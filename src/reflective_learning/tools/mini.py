@@ -254,7 +254,7 @@ def f_callback(
                 )
             )
 
-        prefix = torch.concatenate(prefix, dim=0)
+        prefix = torch.stack(prefix, dim=0)
 
         action = f_inference(
             model=model,
