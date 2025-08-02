@@ -185,13 +185,15 @@ class ReflectiveCore(nn.Module):
 
         # True for valid, False for padding
         B, T = embed.size(0), embed.size(1)
-        mask = torch.arange(T, device=padded.device).expand(B, T) < count.unsqueeze(
+        mask = torch.arange(T, device=device).expand(B, T) < count.unsqueeze(
             1
         )  # shape: [B, T]
 
+        print("SHAPE ----- ", mask.shape, embed.shape, torch.stack(token_label).shape, torch.stack(state_label).shape)
+
         return {
-            "mask": padded_mask,  # [B, T]
-            "embed": padded_embed,  # [B, T, D]
+            "mask": mask,  # [B, T]
+            "embed": embed,  # [B, T, D]
             "token": torch.stack(token_label),  # [B]
             "state": torch.stack(state_label),  # [B]
         }
