@@ -80,8 +80,6 @@ class ReflectiveCore(nn.Module):
         """
         B, T, D = embed.shape
 
-        print("MASK / EMBED SHAPE: ", mask.shape, embed.shape)
-
         # Positional embedding
         pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
         x = embed + self.pos_embedding(pos)  # [B, T, D]
@@ -165,11 +163,6 @@ class ReflectiveCore(nn.Module):
         # max_len = 0
 
         for entry in batch:
-            print("ENTRY; COLLATE: -- ", entry)
-            print("ENTRY; COLLATE: -- ", entry["token"].shape)
-            print("ENTRY; COLLATE: -- ", entry["state"].shape)
-            print("ENTRY; COLLATE: -- ", entry["prefix"].shape)
-
             token = entry["token"].to(device)  # [T]
             state = entry["state"].to(device)  # []
             prefix = entry["prefix"].to(device)  # [C, D]
@@ -200,14 +193,6 @@ class ReflectiveCore(nn.Module):
         mask = torch.arange(T, device=device).expand(B, T) < count.unsqueeze(
             1
         )  # shape: [B, T]
-
-        print(
-            "SHAPE ----- ",
-            mask.shape,
-            embed.shape,
-            torch.stack(token_label).shape,
-            torch.stack(state_label).shape,
-        )
 
         return {
             "mask": mask,  # [B, T]

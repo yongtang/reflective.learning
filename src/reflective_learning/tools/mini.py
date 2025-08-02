@@ -272,24 +272,19 @@ def f_callback(
 
 @functools.lru_cache(maxsize=4096)
 def f_line(vocab_fn, state_fn, encoder, image, line):
-    print("LINE --- ", line)
     entry = json.loads(line)
-    print("ENTRY --- ", entry)
 
     token = torch.tensor(
         [vocab_fn(e) for e in entry["token"]],
         dtype=torch.long,
     )
-    print("TOKEN --- ", token)
     state = torch.tensor(
         state_fn(entry["state"]),
         dtype=torch.long,
     )
-    print("STATE --- ", state)
     prefix = encoder.encode(
         entry["text"], [os.path.join(image, e) for e in entry["image"]]
     )
-    print("PREFIX --- ", prefix)
 
     return {
         "token": token,
@@ -518,7 +513,6 @@ def run_learn(
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
     )
-    print("INFO: ", info)
     print(f"Load info: {json.dumps(info, sort_keys=True)}")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))

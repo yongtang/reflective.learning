@@ -49,14 +49,6 @@ def train(
         for batch in loader:
             model.train()
 
-            print(
-                "XXXXXXX - ",
-                batch["mask"].shape,
-                batch["embed"].shape,
-                batch["token"].shape,
-                batch["state"].shape,
-            )
-
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L, L]
             embed = batch["embed"].to(device)  # [B, L, d_model]
