@@ -180,8 +180,7 @@ def f_inference(
         model=model,
         prefix=prefix,
         weights=weights,
-        stop_token=0,
-        max_seq_len=max_steps,
+        maximum=max_steps,
         device=device,
     )
     action = [minigrid.core.actions.Actions(e.item()).name for e in token]
