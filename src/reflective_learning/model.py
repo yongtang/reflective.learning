@@ -88,6 +88,8 @@ class ReflectiveCore(nn.Module):
         pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
         x = embed + self.pos_embedding(pos)  # [B, T, D]
 
+        print("SHAPE YYY --- ", T, B, embed.shape, pos.shape, x.shape, mask.shape)
+
         # Padding mask: [B, T], True = PAD — so invert `mask`
         src_key_padding_mask = ~mask
 
