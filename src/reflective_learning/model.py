@@ -176,7 +176,7 @@ class ReflectiveCore(nn.Module):
             embed.append(x)
 
         # Length of embed
-        count = torch.tensor([e.size(0) for e in embed], device=embed.device)
+        count = torch.tensor([e.size(0) for e in embed], device=device)
 
         # Pad to longest sequence with zeros
         embed = torch.nn.utils.rnn.pad_sequence(
