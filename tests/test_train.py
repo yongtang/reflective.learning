@@ -27,8 +27,8 @@ class DummyDataset(torch.utils.data.Dataset):
 
 
 def test_train_sanity():
-    decoder = torch.nn.TransformerDecoder(
-        torch.nn.TransformerDecoderLayer(
+    decoder = torch.nn.TransformerEncoder(
+        torch.nn.TransformerEncoderLayer(
             d_model=16,
             nhead=2,
             batch_first=True,

@@ -457,18 +457,11 @@ def run_spin(seed, data, image, max_steps):
 
     model = f_model(info)
 
-    os.makedirs(data, exist_ok=True)
-    torch.save(
-        {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
-    )
-
-    print(f"Save model: {os.path.join(data, 'model.pt')}")
-
     with open(os.path.join(data, "seed.data"), "w") as f:
         with open(seed, "r") as g:
             with tqdm(
                 total=total,
-                desc="Spin",
+                desc="Spin learn",
                 dynamic_ncols=True,
                 bar_format=bar_format,
                 unit="seed",
@@ -495,6 +488,13 @@ def run_spin(seed, data, image, max_steps):
                             )
                             + "\n"
                         )
+
+    os.makedirs(data, exist_ok=True)
+    torch.save(
+        {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
+    )
+
+    print(f"Save model: {os.path.join(data, 'model.pt')}")
 
 
 def run_learn(
