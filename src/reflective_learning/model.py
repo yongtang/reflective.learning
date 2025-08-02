@@ -10,7 +10,7 @@ class ReflectiveCore(nn.Module):
         state_size: int,
         max_seq_len: int,
         max_prefix_len: int,
-        decoder: nn.TransformerDecoder,
+        decoder: nn.TransformerEncoder,
     ):
         """
         ReflectiveCore Transformer model that predicts P(token | context, state).
@@ -20,7 +20,7 @@ class ReflectiveCore(nn.Module):
             state_size: Number of mutually exclusive state classes.
             max_seq_len: Max token sequence length (for position embeddings).
             max_prefix_len: Max prefix length (prepended to each sequence).
-            decoder: Standard nn.TransformerDecoder module.
+            decoder: Standard nn.TransformerEncoder module.
         """
         super().__init__()
 

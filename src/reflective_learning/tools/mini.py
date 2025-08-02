@@ -114,8 +114,8 @@ def f_model(info):
     max_seq_len = info["max"]
     max_prefix_len = 512
 
-    decoder = torch.nn.TransformerDecoder(
-        torch.nn.TransformerDecoderLayer(
+    decoder = torch.nn.TransformerEncoder(
+        torch.nn.TransformerEncoderLayer(
             batch_first=True,
             **info["layer"],
         ),
