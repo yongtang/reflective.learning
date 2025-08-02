@@ -26,7 +26,7 @@ def train(
         device: Optional device override (defaults to CUDA if available).
     """
 
-    loss_width = 7
+    loss_width = 10
     sample_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
@@ -78,7 +78,7 @@ def train(
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix_str(
-                f"loss={loss_value:{loss_width}.4f}  samples={count:{sample_width}d}"
+                f"loss={loss_value:{loss_width}.2e}  samples={count:{sample_width}d}"
             )
 
             if callback:
