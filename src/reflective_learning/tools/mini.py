@@ -180,6 +180,7 @@ def f_inference(
     model,
     vocab,
     weights,
+    maximum,
     prefix,
     device,
 ):
@@ -256,6 +257,7 @@ def f_callback(
             model=model,
             vocab=vocab,
             weights=weights,
+            maximum=max_steps,
             prefix=prefix,
             device=device,
         )
@@ -665,6 +667,7 @@ def run_play(goal, start, facing, model, device):
             model=model,
             vocab=vocab,
             weights=weights,
+            maximum=max_steps,
             prefix=prefix,
             device=device,
         )
