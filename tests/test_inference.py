@@ -26,13 +26,13 @@ def make_dummy_model():
 def test_sequence():
     model = make_dummy_model()
     prefix = torch.randn(4, 16)  # [C, d_model]
-    weights = torch.tensor([0.7, 0.3])  # [S]
+    weight = torch.tensor([0.7, 0.3])  # [S]
     maximum = 10
 
     tokens = sequence(
         model=model,
         prefix=prefix,
-        weights=weights,
+        weight=weight,
         maximum=maximum,
         device="cpu",
     )

@@ -10,6 +10,7 @@ def train(
     model: ReflectiveCore,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
+    weight: torch.Tensor,
     total: int,
     callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
     device: Optional[torch.device] = None,
@@ -21,6 +22,7 @@ def train(
         model: The ReflectiveCore model to train.
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
+        weight: Weights of the desired states.
         total: Total number of training samples to process.
         callback: A function called periodically during training.
         device: Optional device override (defaults to CUDA if available).
@@ -65,7 +67,7 @@ def train(
 
             # Forward pass (model returns logit at final position)
             logit = model.call(mask=mask, embed=embed)  # [B, V, S]
-            loss = model.loss(logit, token_label, state_label)
+            loss = model.loss(logit, token_label, state_label, weight)
             loss_value = loss.item()
 
             # Backpropagation

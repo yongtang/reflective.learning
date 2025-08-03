@@ -112,6 +112,7 @@ class ReflectiveCore(nn.Module):
         logit: torch.Tensor,  # [B, V, S] predicted logit.
         token: torch.Tensor,  # [B] – token index per sequence.
         state: torch.Tensor,  # [B] – state index per sequence.
+        weight: torch.Tensor,  # [S] – importance weight per state.
     ) -> torch.Tensor:
         """
         Computes cross-entropy loss against a single (token, state) pair per sequence.
@@ -120,6 +121,7 @@ class ReflectiveCore(nn.Module):
             logit: [B, V, S] predicted logit.
             token: [B] ground truth token index per sequence.
             state: [B] ground truth state index per sequence.
+            weight: [S] importance weight per state.
 
         Returns:
             Scalar loss (cross entropy).
@@ -130,8 +132,18 @@ class ReflectiveCore(nn.Module):
         # Select the logits for the token - shape: [B, S]
         value = logit[torch.arange(B), token]
 
-        # compute cross-entropy loss for state class
-        return F.cross_entropy(value, state)
+        # Compute per-sample unweighted cross-entropy loss (no reduction), shape: [B]
+        loss = F.cross_entropy(value, state, reduction="none")
+
+        # Step 3: Normalize weight to mean 1.0
+        weight = torch.clamp(weight, min=0)
+        weight = weight / weight.mean()  # shape: [S]
+
+        # Select per-sample weight based on state labels, shape: [B]
+        weight = weight[state]
+
+        # Step 5: Compute weighted mean loss
+        return (loss * weight).mean()
 
     def collate(self, batch):
         """

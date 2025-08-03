@@ -60,6 +60,7 @@ def test_train_sanity():
             model=model,
             loader=loader,
             optimizer=optimizer,
+            weight=torch.tensor([1.0, 1.0]),
             total=20,
             callback=f_callback,
             device=torch.device("cpu"),

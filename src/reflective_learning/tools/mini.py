@@ -158,6 +158,20 @@ def f_model(info):
     return model
 
 
+def f_weight(info):
+    assert list(sorted(info["state"].values())) == list(
+        range(len(info["state"]))
+    ), f"{info['state']}"
+
+    weight = list(sorted((info["state"][k], v) for k, v in info["weight"].items()))
+    assert list(i for i, v in weight) == list(
+        range(len(info["state"]))
+    ), f"{info['weight']} vs. {info['state']}"
+    weight = list(v for i, v in weight)
+
+    return weight
+
+
 def f_image(env_size, max_steps, goal, start, facing, image):
     filename = f"env_{env_size}_goal_{goal[0]}_{goal[1]}_start_{start[0]}_{start[1]}_facing_{facing}.png"
     if not os.path.exists(os.path.join(image, filename)):
@@ -202,7 +216,7 @@ def f_prefix(goal, start, facing, env_size, max_steps, encoder, image):
 def f_inference(
     model,
     vocab,
-    weights,
+    weight,
     maximum,
     prefix,
     device,
@@ -219,7 +233,7 @@ def f_inference(
     token = sequence(
         model=model,
         prefix=prefix,
-        weights=weights,
+        weight=weight,
         maximum=maximum,
         device=device,
     )
@@ -250,8 +264,8 @@ def f_callback(
         # env_size, max_steps
         env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
-        weights = torch.tensor([1.0] * max_steps + [0.01])
-        weights = torch.nn.functional.normalize(weights, p=2, dim=0)
+        weight = torch.tensor([1.0] * max_steps + [0.01])
+        weight = torch.nn.functional.normalize(weight, p=2, dim=0)
 
         prefix = list()
 
@@ -282,7 +296,7 @@ def f_callback(
         action = f_inference(
             model=model,
             vocab=vocab,
-            weights=weights,
+            weight=weight,
             maximum=max_steps,
             prefix=prefix,
             device=device,
@@ -506,6 +520,10 @@ def run_spin(seed, data, image):
             f_step(step=e, max_steps=max_steps): (e - 1)
             for e in range(1, max_steps + 1 + 1)
         },
+        "weight": {
+            f_step(step=e, max_steps=max_steps): 1.0 if e <= max_steps else 0.01
+            for e in range(1, max_steps + 1 + 1)
+        },
         "layer": {
             "d_model": 768,
             "nhead": 12,
@@ -606,6 +624,8 @@ def run_learn(
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
+    weight = torch.tensor(f_weight(info), device=device)
+
     with open(os.path.join(data, "seed.data"), "r") as f:
         with tqdm(
             total=os.path.getsize(os.path.join(data, "seed.data")),
@@ -658,6 +678,7 @@ def run_learn(
                 model=model,
                 loader=loader,
                 optimizer=optimizer,
+                weight=weight,
                 total=total,
                 callback=functools.partial(
                     f_callback,
@@ -691,10 +712,9 @@ def run_play(goal, start, facing, model, device):
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
+    weight = torch.tensor(f_weight(info), device=device)
 
-    weights = torch.tensor([1.0] * max_steps + [0.01])
-    weights = torch.nn.functional.normalize(weights, p=2, dim=0)
+    env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
     with tempfile.TemporaryDirectory() as image:
         prefix = f_prefix(
@@ -710,7 +730,7 @@ def run_play(goal, start, facing, model, device):
         action = f_inference(
             model=model,
             vocab=vocab,
-            weights=weights,
+            weight=weight,
             maximum=max_steps,
             prefix=prefix,
             device=device,
