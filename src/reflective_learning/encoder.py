@@ -59,18 +59,28 @@ class ContextEncoder:
             output = self.image_model(pixel_values=pixel_values)
             return output.last_hidden_state.squeeze(0).detach().cpu()
 
-    def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
+    def encode_embed(
+        self, text: list[torch.Tensor], image: list[torch.Tensor]
+    ) -> torch.Tensor:
         segments = []
         break_embed = torch.zeros(
             (1, self.text_model.config.hidden_size), dtype=torch.float32
         )
 
-        for t in text:
-            segments.append(self.encode_text_embed(t))
+        for chunk in text:
+            segments.append(chunk)
         segments.append(break_embed.clone())
 
-        for path in image:
-            segments.append(self.encode_image_embed(path))
+        for chunk in image:
+            segments.append(chunk)
         segments.append(break_embed.clone())
 
         return torch.cat(segments, dim=0)
+
+    def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
+
+        text = list(self.encode_text_embed(chunk) for chunk in text)
+
+        image = list(self.encode_image_embed(chunk) for chunk in image)
+
+        return self.encode_embed(text, image)

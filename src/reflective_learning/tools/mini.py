@@ -1,5 +1,6 @@
 import argparse
 import functools
+import io
 import json
 import operator
 import os
@@ -7,6 +8,7 @@ import random
 import shutil
 import tempfile
 
+import lmdb
 import minigrid
 import numpy as np
 import PIL.Image
@@ -33,7 +35,7 @@ def f_step(step, max_steps):
     return f"done:{step}" if step <= max_steps else f"fail:{max_steps}"
 
 
-def f_observation(env_size, steps, done):
+def f_observation(env_size, steps):
     env = minigrid.envs.EmptyEnv(
         size=env_size, max_steps=steps, render_mode=None
     )  # disable truncation
@@ -55,16 +57,15 @@ def f_observation(env_size, steps, done):
             minigrid.core.actions.Actions.right,
             minigrid.core.actions.Actions.forward,
         ]
-        for step in range(steps):
-            if step == steps - 1 and done:
-                action.append(minigrid.core.actions.Actions.done.name)
-                break
+        for step in range(steps - 1):
             selected = random.choice(choice)
             env.step(selected)
             action.append(selected.name)
     finally:
         goal = tuple(int(v) for v in env.agent_pos)
         env.close()
+
+    action.append(minigrid.core.actions.Actions.done.name)
 
     return goal, start, facing, action
 
@@ -172,45 +173,23 @@ def f_weight(info):
     return weight
 
 
+def f_text(env_size, max_steps, goal, start, facing):
+    return [
+        f"env {env_size}",
+        f"goal {goal[0]},{goal[1]}",
+        f"start {start[0]},{start[1]}",
+        f"facing {facing}",
+        f"max {max_steps}",
+    ]
+
+
 def f_image(env_size, max_steps, goal, start, facing, image):
     filename = f"env_{env_size}_goal_{goal[0]}_{goal[1]}_start_{start[0]}_{start[1]}_facing_{facing}.png"
     if not os.path.exists(os.path.join(image, filename)):
         os.makedirs(image, exist_ok=True)
         img = f_render(env_size, max_steps, goal, start, facing)
         PIL.Image.fromarray(img).save(os.path.join(image, filename))
-    return filename
-
-
-def f_entry(env_size, max_steps, goal, start, facing, action, image):
-    filename = f_image(env_size, max_steps, goal, start, facing, image)
-
-    step = f_replay(env_size, max_steps, goal, start, facing, action)
-    state = f_step(step=step, max_steps=max_steps)
-
-    return {
-        "text": [
-            f"goal {goal[0]},{goal[1]}",
-            f"start {start[0]},{start[1]}",
-            f"facing {facing}",
-        ],
-        "image": [filename],
-        "token": action,
-        "state": state,
-    }
-
-
-def f_prefix(goal, start, facing, env_size, max_steps, encoder, image):
-    filename = f_image(env_size, max_steps, goal, start, facing, image)
-
-    prefix = encoder.encode(
-        [
-            f"goal {goal[0]},{goal[1]}",
-            f"start {start[0]},{start[1]}",
-            f"facing {facing}",
-        ],
-        [os.path.join(image, filename)],
-    )
-    return prefix
+    return [filename]
 
 
 def f_inference(
@@ -245,10 +224,11 @@ def f_callback(
     info,
     data,
     image,
-    stub_index,
+    stub_total,
     stub_batch,
     stub_interval,
     save_interval,
+    database,
     encoder,
     model,
     progress,
@@ -267,8 +247,7 @@ def f_callback(
         weight = torch.tensor([1.0] * max_steps + [0.01])
         weight = torch.nn.functional.normalize(weight, p=2, dim=0)
 
-        prefix = list()
-
+        entries = []
         for i in range(stub_batch):
 
             # goal, start, facing
@@ -279,47 +258,86 @@ def f_callback(
                     break
             facing = facing_space[random.randint(0, len(facing_space) - 1)]
 
-            prefix.append(
-                f_prefix(
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    env_size=env_size,
-                    max_steps=max_steps,
-                    encoder=encoder,
-                    image=image,
-                )
+            entry_text = f_text(
+                env_size=env_size,
+                max_steps=max_steps,
+                goal=goal,
+                start=start,
+                facing=facing,
             )
-
-        prefix = torch.stack(prefix, dim=0)
+            entry_image = f_image(
+                env_size=env_size,
+                max_steps=max_steps,
+                goal=goal,
+                start=start,
+                facing=facing,
+                image=image,
+            )
+            prefix = f_prefix(
+                entry_text=entry_text,
+                entry_image=entry_image,
+                encoder=encoder,
+                database=database,
+                image=image,
+            )
+            entries.append(
+                {
+                    "goal": goal,
+                    "start": start,
+                    "facing": facing,
+                    "text": entry_text,
+                    "image": entry_image,
+                    "prefix": prefix,
+                }
+            )
 
         action = f_inference(
             model=model,
             vocab=vocab,
             weight=weight,
             maximum=max_steps,
-            prefix=prefix,
+            prefix=torch.stack([entry["prefix"] for entry in entries], dim=0),
             device=device,
         )
 
         for i in range(stub_batch):
-            stub = f_entry(
-                env_size=env_size,
+            state = f_step(
+                step=f_replay(
+                    env_size=env_size,
+                    max_steps=max_steps,
+                    goal=entries[i]["goal"],
+                    start=entries[i]["start"],
+                    facing=entries[i]["facing"],
+                    action=action[i],
+                ),
                 max_steps=max_steps,
-                goal=goal,
-                start=start,
-                facing=facing,
-                action=action[i],
-                image=image,
             )
 
-            with open(os.path.join(data, "stub.data"), "a") as f:
-                f.seek(0, os.SEEK_END)
-                offset = f.tell()
-                f.write(json.dumps(stub, sort_keys=True) + "\n")
+            entry = {
+                "text": entries[i]["text"],
+                "image": entries[i]["image"],
+                "token": action[i],
+                "state": state,
+            }
 
-            selection = np.random.randint(0, len(stub_index))
-            stub_index[selection] = offset
+            with open(os.path.join(data, "stub.data"), "a") as f:
+                f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+            for data_index in range(len(entry["token"])):
+                selection = random.randint(0, stub_total - 1)
+                data_entry = json.dumps(
+                    {
+                        "text": entry["text"],
+                        "image": entry["image"],
+                        "token": entry["token"][: data_index + 1],
+                        "state": entry["state"],
+                    },
+                    sort_keys=True,
+                )
+                with database.begin(write=True) as transaction:
+                    transaction.put(
+                        f"stub_{selection:08d}".encode(), data_entry.encode()
+                    )
 
         progress._meta_stub_ += stub_interval
 
@@ -348,8 +366,65 @@ def f_callback(
     return
 
 
+def f_tensor_to_bytes(tensor: torch.Tensor) -> bytes:
+    array = tensor.cpu().numpy()
+    buffer = io.BytesIO()
+    np.save(buffer, array, allow_pickle=False)
+    return buffer.getvalue()
+
+
+def f_bytes_to_tensor(buffer: bytes) -> torch.Tensor:
+    array = np.load(io.BytesIO(buffer), allow_pickle=False)
+    return torch.from_numpy(array)
+
+
+def f_encode_text_embed(chunk, encoder, database):
+    key = f"text_{json.dumps(chunk, sort_keys=True)}".encode()
+
+    if database:
+        with database.begin() as transaction:
+            value = transaction.get(key)
+        if value is not None:
+            return f_bytes_to_tensor(value)
+
+    chunk = encoder.encode_text_embed(chunk)
+    if database:
+        value = f_tensor_to_bytes(chunk)
+        with database.begin(write=True) as transaction:
+            transaction.put(key, value)
+    return chunk
+
+
+def f_encode_image_embed(chunk, encoder, database, image):
+    key = f"image_{json.dumps(chunk, sort_keys=True)}".encode()
+
+    if database:
+        with database.begin() as transaction:
+            value = transaction.get(key)
+        if value is not None:
+            return f_bytes_to_tensor(value)
+
+    chunk = encoder.encode_image_embed(os.path.join(image, chunk))
+    if database:
+        value = f_tensor_to_bytes(chunk)
+        with database.begin(write=True) as transaction:
+            transaction.put(key, value)
+    return chunk
+
+
+def f_prefix(entry_text, entry_image, encoder, database, image):
+    text_embed = list(
+        f_encode_text_embed(chunk, encoder, database) for chunk in entry_text
+    )
+    image_embed = list(
+        f_encode_image_embed(chunk, encoder, database, image) for chunk in entry_image
+    )
+
+    return encoder.encode_embed(text=text_embed, image=image_embed)
+
+
 @functools.lru_cache(maxsize=4096)
-def f_line(vocab_fn, state_fn, max_steps, image, encoder, line):
+def f_line(vocab_fn, state_fn, max_steps, image, encoder, database, line):
     entry = json.loads(line)
 
     assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
@@ -362,9 +437,13 @@ def f_line(vocab_fn, state_fn, max_steps, image, encoder, line):
         state_fn(entry["state"]),
         dtype=torch.long,
     )
-    prefix = encoder.encode(
-        entry["text"],
-        [os.path.join(image, e) for e in entry["image"]],
+
+    prefix = f_prefix(
+        entry_text=entry["text"],
+        entry_image=entry["image"],
+        encoder=encoder,
+        database=database,
+        image=image,
     )
 
     return {
@@ -374,43 +453,35 @@ def f_line(vocab_fn, state_fn, max_steps, image, encoder, line):
     }
 
 
-@functools.lru_cache(maxsize=4096)
-def f_file(file, offset):
-    if offset >= 0:
-        file.seek(offset)
-        line = file.readline()
-        return line.strip()
-    return None
-
-
 class IterableDataset(torch.utils.data.IterableDataset):
-    def __init__(self, seed_file, seed_index, stub_file, stub_index, chance, line_fn):
+    def __init__(self, database, seed_total, stub_total, line_fn):
         super().__init__()
-        self.seed = seed_file, seed_index
-        self.stub = stub_file, stub_index
-        self.chance = chance
+        self.database = database
+        self.seed_total = seed_total
+        self.stub_total = stub_total
         self.line_fn = line_fn
 
     def __iter__(self):
         while True:
-            if np.random.rand() > self.chance:
-                selection = self.seed
+            selection = random.randint(0, self.seed_total + self.stub_total - 1)
+            if selection < self.seed_total:
+                selection = f"seed_{selection:08d}".encode()
             else:
-                selection = self.stub
-            file, index = selection
-            offset = np.random.choice(index)
-            line = f_file(file=file, offset=offset)
-            if line:
-                yield self.line_fn(line=line)
+                selection = selection - self.seed_total
+                selection = f"stub_{selection:08d}".encode()
+            with self.database.begin() as transaction:
+                selection = transaction.get(selection)
+            if selection:
+                yield self.line_fn(line=selection)
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     step_width = len(str(max_steps))
-    count_width = len(str(num_seeds))
+    total_width = len(str(num_seeds))
     iteration_width = len(str(num_seeds * 2))  # allow room for retries
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
-        f"{{n:{count_width}d}}/{{total:{count_width}d}} "
+        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
@@ -426,11 +497,8 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
             count = 0
             while count < num_seeds:
                 iteration += 1
-                steps = random.randint(1, max_steps + 1 + 1)
-                steps, done = min(steps, max_steps), (steps <= max_steps)
-                goal, start, facing, action = f_observation(
-                    env_size, steps=steps, done=done
-                )
+                steps = random.randint(1, max_steps + 1)
+                goal, start, facing, action = f_observation(env_size, steps=steps)
 
                 if list(goal) == list(start):
                     continue  # skip invalid seed
@@ -444,7 +512,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
 
                 f.write(json.dumps(seed, sort_keys=True) + "\n")
                 progress.set_postfix_str(
-                    f"steps={steps:{step_width}d} saved={count+1:{count_width}d} iteration={iteration:{iteration_width}d}"
+                    f"steps={steps:{step_width}d} saved={count+1:{total_width}d} iteration={iteration:{iteration_width}d}"
                 )
                 progress.update(1)
                 count += 1
@@ -548,6 +616,8 @@ def run_spin(seed, data, image):
 
     model = f_model(info)
 
+    os.makedirs(data, exist_ok=True)
+
     with open(os.path.join(data, "seed.data"), "w") as f:
         with open(seed, "r") as g:
             with tqdm(
@@ -574,21 +644,40 @@ def run_spin(seed, data, image):
 
                         f.write(
                             json.dumps(
-                                f_entry(
-                                    env_size=info["env"],
-                                    max_steps=info["max"],
-                                    goal=entry["goal"],
-                                    start=entry["start"],
-                                    facing=entry["facing"],
-                                    action=entry["action"],
-                                    image=image,
-                                ),
+                                {
+                                    "text": f_text(
+                                        env_size=info["env"],
+                                        max_steps=info["max"],
+                                        goal=entry["goal"],
+                                        start=entry["start"],
+                                        facing=entry["facing"],
+                                    ),
+                                    "image": f_image(
+                                        env_size=info["env"],
+                                        max_steps=info["max"],
+                                        goal=entry["goal"],
+                                        start=entry["start"],
+                                        facing=entry["facing"],
+                                        image=image,
+                                    ),
+                                    "token": entry["action"],
+                                    "state": f_step(
+                                        step=f_replay(
+                                            env_size=info["env"],
+                                            max_steps=info["max"],
+                                            goal=entry["goal"],
+                                            start=entry["start"],
+                                            facing=entry["facing"],
+                                            action=entry["action"],
+                                        ),
+                                        max_steps=max_steps,
+                                    ),
+                                },
                                 sort_keys=True,
                             )
                             + "\n"
                         )
 
-    os.makedirs(data, exist_ok=True)
     torch.save(
         {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
     )
@@ -626,73 +715,92 @@ def run_learn(
 
     weight = torch.tensor(f_weight(info), device=device)
 
-    with open(os.path.join(data, "seed.data"), "r") as f:
-        with tqdm(
-            total=os.path.getsize(os.path.join(data, "seed.data")),
-            desc="Seed index",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            off = 0
-            offset = []
-            for line in f:
-                progress.update(len(line.encode("utf-8")))
-                if line.strip():
-                    offset.append(off)
-                off += len(line)
-    seed_index = np.array(offset, dtype=np.int64)
+    # 4GB = 1<<32
+    database = lmdb.open(data, map_size=1 << 32, readonly=False, create=True)
 
-    with open(os.path.join(data, "stub.data"), "w") as f:
-        pass
-    stub_index = np.full(reservoir, -1, dtype=np.int64)
-    print(f"Stub index: {os.path.join(data, 'stub.data')}")
+    seed_total, stub_total = 0, 0
+    with database.begin(write=True) as transaction:
+        with open(os.path.join(data, "seed.data"), "r") as f:
+            with tqdm(
+                total=os.path.getsize(os.path.join(data, "seed.data")),
+                desc="Seed index",
+                unit="B",
+                unit_scale=True,
+                dynamic_ncols=True,
+            ) as progress:
+                for line in f:
+                    progress.update(len(line.encode("utf-8")))
+                    if line.strip():
+                        entry = json.loads(line)
+                        for data_index in range(len(entry["token"])):
+                            data_entry = json.dumps(
+                                {
+                                    "text": entry["text"],
+                                    "image": entry["image"],
+                                    "token": entry["token"][: data_index + 1],
+                                    "state": entry["state"],
+                                },
+                                sort_keys=True,
+                            )
+                            transaction.put(
+                                f"seed_{seed_total:08d}".encode(), data_entry.encode()
+                            )
+                            seed_total += 1
 
-    with open(os.path.join(data, "seed.data"), "r") as seed_file:
-        with open(os.path.join(data, "stub.data"), "r") as stub_file:
+        with open(os.path.join(data, "stub.data"), "w") as f:
+            with tqdm(
+                total=reservoir,
+                desc="Stub index",
+                unit="sub",
+                dynamic_ncols=True,
+            ) as progress:
+                for stub_index in range(reservoir):
+                    progress.update(1)
+                    transaction.delete(f"stub_{stub_total:08d}".encode())
+                    stub_total += 1
 
-            dataset = IterableDataset(
-                seed_file,
-                seed_index,
-                stub_file,
-                stub_index,
-                chance=0.5,
-                line_fn=functools.partial(
-                    f_line,
-                    vocab_fn=lambda e: info["vocab"][e],
-                    state_fn=lambda e: info["state"][e],
-                    max_steps=info["max"],
-                    image=image,
-                    encoder=encoder,
-                ),
-            )
-            loader = torch.utils.data.DataLoader(
-                dataset,
-                batch_size=batch,
-                collate_fn=model.collate,
-            )
+    dataset = IterableDataset(
+        database,
+        seed_total,
+        stub_total,
+        line_fn=functools.partial(
+            f_line,
+            vocab_fn=lambda e: info["vocab"][e],
+            state_fn=lambda e: info["state"][e],
+            max_steps=info["max"],
+            image=image,
+            encoder=encoder,
+            database=database,
+        ),
+    )
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch,
+        collate_fn=model.collate,
+    )
 
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-            train(
-                model=model,
-                loader=loader,
-                optimizer=optimizer,
-                weight=weight,
-                total=total,
-                callback=functools.partial(
-                    f_callback,
-                    info=info,
-                    data=data,
-                    image=image,
-                    stub_index=stub_index,
-                    stub_batch=stub_batch,
-                    stub_interval=stub_interval,
-                    save_interval=save_interval,
-                    encoder=encoder,
-                ),
-                device=device,
-            )
+    train(
+        model=model,
+        loader=loader,
+        optimizer=optimizer,
+        weight=weight,
+        total=total,
+        callback=functools.partial(
+            f_callback,
+            info=info,
+            data=data,
+            image=image,
+            stub_total=stub_total,
+            stub_batch=stub_batch,
+            stub_interval=stub_interval,
+            save_interval=save_interval,
+            database=database,
+            encoder=encoder,
+        ),
+        device=device,
+    )
 
 
 def run_play(goal, start, facing, model, device):
@@ -717,13 +825,26 @@ def run_play(goal, start, facing, model, device):
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
     with tempfile.TemporaryDirectory() as image:
-        prefix = f_prefix(
+        entry_text = f_text(
+            env_size=env_size,
+            max_steps=max_steps,
             goal=goal,
             start=start,
             facing=facing,
+        )
+        entry_image = f_image(
             env_size=env_size,
             max_steps=max_steps,
+            goal=goal,
+            start=start,
+            facing=facing,
+            image=image,
+        )
+        prefix = f_prefix(
+            entry_text=entry_text,
+            entry_image=entry_image,
             encoder=encoder,
+            database=None,
             image=image,
         )
 
