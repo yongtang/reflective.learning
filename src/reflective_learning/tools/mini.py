@@ -19,6 +19,7 @@ from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import train
 
 action_space = [
+    minigrid.core.actions.Actions.done,
     minigrid.core.actions.Actions.left,
     minigrid.core.actions.Actions.right,
     minigrid.core.actions.Actions.forward,
@@ -27,14 +28,14 @@ facing_space = ["right", "down", "left", "up"]
 
 
 def f_step(step, max_steps):
-    assert step, f"invalid step {step}"
+    assert 0 < step, f"invalid step {step}"
 
     return f"done:{step}" if step <= max_steps else f"fail:{max_steps}"
 
 
-def f_observation(env_size, max_steps):
+def f_observation(env_size, steps, done):
     env = minigrid.envs.EmptyEnv(
-        size=env_size, max_steps=max_steps, render_mode=None
+        size=env_size, max_steps=steps, render_mode=None
     )  # disable truncation
     env.reset()
 
@@ -49,10 +50,18 @@ def f_observation(env_size, max_steps):
     action = []
 
     try:
-        for _ in range(max_steps):
-            step = random.choice(action_space)
-            env.step(step)
-            action.append(step.name)
+        choice = [
+            minigrid.core.actions.Actions.left,
+            minigrid.core.actions.Actions.right,
+            minigrid.core.actions.Actions.forward,
+        ]
+        for step in range(steps):
+            if step == steps - 1 and done:
+                action.append(minigrid.core.actions.Actions.done.name)
+                break
+            selected = random.choice(choice)
+            env.step(selected)
+            action.append(selected.name)
     finally:
         goal = tuple(int(v) for v in env.agent_pos)
         env.close()
@@ -60,7 +69,15 @@ def f_observation(env_size, max_steps):
     return goal, start, facing, action
 
 
-def f_verify(env_size, max_steps, goal, start, facing, action):
+def f_replay(env_size, max_steps, goal, start, facing, action):
+    assert len(action) > 0
+
+    done = minigrid.core.actions.Actions.done.name
+    assert (
+        done not in action or action.count(done) == 1 and action[-1] == done
+    ), f"{action}"
+    done = done in action
+
     env = minigrid.envs.EmptyEnv(
         size=env_size, max_steps=max_steps, render_mode=None
     )  # disable truncation
@@ -70,17 +87,19 @@ def f_verify(env_size, max_steps, goal, start, facing, action):
     env.agent_dir = facing_space.index(facing)
 
     try:
-        if tuple(int(e) for e in env.agent_pos) == tuple(goal):
-            return 0  # reached without any steps
+        for name in action[:-1]:
+            assert name != minigrid.core.actions.Actions.done.name, f"{action}"
+            env.step(getattr(minigrid.core.actions.Actions, name))
 
-        for i, step in enumerate(action):
-            env.step(getattr(minigrid.core.actions.Actions, step))
+        name = action[-1]
+        if name == minigrid.core.actions.Actions.done.name:
             if tuple(int(e) for e in env.agent_pos) == tuple(goal):
-                return i + 1
+                return len(action)
+
     finally:
         env.close()
 
-    return max_steps + 1  # did not reach goal
+    return max_steps + 1  # did not reach goal with done
 
 
 def f_render(env_size, max_steps, goal, start, facing):
@@ -109,8 +128,14 @@ def f_render(env_size, max_steps, goal, start, facing):
 
 
 def f_model(info):
-    vocab_size = 1 + len(action_space)
-    state_size = info["max"] + 1
+    vocab_indices = sorted(info["vocab"].values())
+    assert vocab_indices == list(range(len(vocab_indices))), f"{info['vocab']}"
+    vocab_size = len(vocab_indices)
+
+    state_indices = sorted(info["state"].values())
+    assert state_indices == list(range(len(state_indices))), f"{info['state']}"
+    state_size = len(state_indices)
+
     max_seq_len = info["max"]
     max_prefix_len = 512
 
@@ -145,9 +170,7 @@ def f_image(env_size, max_steps, goal, start, facing, image):
 def f_entry(env_size, max_steps, goal, start, facing, action, image):
     filename = f_image(env_size, max_steps, goal, start, facing, image)
 
-    step = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
-
-    token = action[:step]
+    step = f_replay(env_size, max_steps, goal, start, facing, action)
     state = f_step(step=step, max_steps=max_steps)
 
     return {
@@ -157,7 +180,7 @@ def f_entry(env_size, max_steps, goal, start, facing, action, image):
             f"facing {facing}",
         ],
         "image": [filename],
-        "token": token,
+        "token": action,
         "state": state,
     }
 
@@ -185,8 +208,8 @@ def f_inference(
     device,
 ):
     def f(token):
-        action = token.squeeze(0).tolist()
-        action = action[: action.index(0)] if 0 in action else action
+        action = token.tolist()
+        action = action[: action.index(0) + 1] if 0 in action else action
 
         symbol = {v: k for k, v in vocab.items()}
         action = [symbol[e] for e in action]
@@ -312,20 +335,22 @@ def f_callback(
 
 
 @functools.lru_cache(maxsize=4096)
-def f_line(vocab_fn, state_fn, max_steps, encoder, image, line):
+def f_line(vocab_fn, state_fn, max_steps, image, encoder, line):
     entry = json.loads(line)
 
+    assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
+
     token = torch.tensor(
-        [vocab_fn(e) for e in entry["token"]] + [0],
+        [vocab_fn(e) for e in entry["token"]],
         dtype=torch.long,
     )
-    token = token[:max_steps]
     state = torch.tensor(
         state_fn(entry["state"]),
         dtype=torch.long,
     )
     prefix = encoder.encode(
-        entry["text"], [os.path.join(image, e) for e in entry["image"]]
+        entry["text"],
+        [os.path.join(image, e) for e in entry["image"]],
     )
 
     return {
@@ -387,8 +412,11 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
             count = 0
             while count < num_seeds:
                 iteration += 1
-                steps = random.randint(1, max_steps)
-                goal, start, facing, action = f_observation(env_size, max_steps=steps)
+                steps = random.randint(1, max_steps + 1 + 1)
+                steps, done = min(steps, max_steps), (steps <= max_steps)
+                goal, start, facing, action = f_observation(
+                    env_size, steps=steps, done=done
+                )
 
                 if list(goal) == list(start):
                     continue  # skip invalid seed
@@ -408,7 +436,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 count += 1
 
 
-def run_spin(seed, data, image, max_steps):
+def run_spin(seed, data, image):
     def f_fail(line):
         entry = json.loads(line)
         if not (0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1):
@@ -449,6 +477,7 @@ def run_spin(seed, data, image, max_steps):
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
+    max_steps = 0
     env_size = set()
     with open(seed, "r") as f:
         with tqdm(
@@ -462,15 +491,17 @@ def run_spin(seed, data, image, max_steps):
                 if line.strip():
                     progress.update(1)
 
-                    env_size.add(json.loads(line)["env"])
+                    entry = json.loads(line)
 
-    assert len(env_size) == 1
+                    env_size.add(entry["env"])
+                    max_steps = max(max_steps, len(entry["action"]))
+    assert len(env_size) == 1, f"{env_size}"
     env_size = next(iter(env_size))
 
     info = {
         "env": env_size,
         "max": max_steps,
-        "vocab": {e.name: (action_space.index(e) + 1) for e in action_space},
+        "vocab": {e.name: (action_space.index(e)) for e in action_space},
         "state": {
             f_step(step=e, max_steps=max_steps): (e - 1)
             for e in range(1, max_steps + 1 + 1)
@@ -515,15 +546,23 @@ def run_spin(seed, data, image, max_steps):
 
                         entry = json.loads(line)
 
+                        assert entry["env"] == info["env"], f"{entry} vs. {info}"
+                        assert (
+                            len(entry["action"]) <= info["max"]
+                        ), f"{entry} vs. {info}"
+                        assert all(
+                            e in info["vocab"].keys() for e in entry["action"]
+                        ), f"{entry} vs. {info}"
+
                         f.write(
                             json.dumps(
                                 f_entry(
-                                    env_size=env_size,
-                                    max_steps=max_steps,
+                                    env_size=info["env"],
+                                    max_steps=info["max"],
                                     goal=entry["goal"],
                                     start=entry["start"],
                                     facing=entry["facing"],
-                                    action=entry["action"][:max_steps],
+                                    action=entry["action"],
                                     image=image,
                                 ),
                                 sort_keys=True,
@@ -603,8 +642,8 @@ def run_learn(
                     vocab_fn=lambda e: info["vocab"][e],
                     state_fn=lambda e: info["state"][e],
                     max_steps=info["max"],
-                    encoder=encoder,
                     image=image,
+                    encoder=encoder,
                 ),
             )
             loader = torch.utils.data.DataLoader(
@@ -676,8 +715,7 @@ def run_play(goal, start, facing, model, device):
             prefix=prefix,
             device=device,
         )
-    step = f_verify(env_size, max_steps, goal, start, facing, action[:max_steps])
-    token = action[:step]
+    step = f_replay(env_size, max_steps, goal, start, facing, action)
     state = f_step(step=step, max_steps=max_steps)
 
     print(f"Play model: ({state}) {action}")
@@ -708,7 +746,6 @@ def main():
     spin_parser.add_argument("--seed", required=True)
     spin_parser.add_argument("--data", required=True)
     spin_parser.add_argument("--image", required=True)
-    spin_parser.add_argument("--max-steps", type=int, required=True)
 
     # ---- learn mode ----
     learn_parser = subparsers.add_parser("learn", help="Learn mode")
@@ -747,7 +784,6 @@ def main():
             seed=args.seed,
             data=args.data,
             image=args.image,
-            max_steps=args.max_steps,
         )
 
     elif args.mode == "learn":
