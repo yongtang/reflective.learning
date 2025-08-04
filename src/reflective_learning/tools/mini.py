@@ -497,7 +497,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
             count = 0
             while count < num_seeds:
                 iteration += 1
-                steps = random.randint(1, max_steps + 1)
+                steps = random.randint(1, max_steps)
                 goal, start, facing, action = f_observation(env_size, steps=steps)
 
                 if list(goal) == list(start):
@@ -518,7 +518,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 count += 1
 
 
-def run_spin(seed, data, image):
+def run_spin(seed, data, image, max_steps):
     def f_fail(line):
         entry = json.loads(line)
         if not (0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1):
@@ -559,7 +559,6 @@ def run_spin(seed, data, image):
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
-    max_steps = 0
     env_size = set()
     with open(seed, "r") as f:
         with tqdm(
@@ -576,7 +575,10 @@ def run_spin(seed, data, image):
                     entry = json.loads(line)
 
                     env_size.add(entry["env"])
-                    max_steps = max(max_steps, len(entry["action"]))
+
+                    assert (
+                        len(entry["action"]) <= max_steps
+                    ), f"{max_steps} vs. {entry['action']}"
     assert len(env_size) == 1, f"{env_size}"
     env_size = next(iter(env_size))
 
@@ -887,6 +889,7 @@ def main():
     spin_parser.add_argument("--seed", required=True)
     spin_parser.add_argument("--data", required=True)
     spin_parser.add_argument("--image", required=True)
+    spin_parser.add_argument("--max-steps", type=int, required=True)
 
     # ---- learn mode ----
     learn_parser = subparsers.add_parser("learn", help="Learn mode")
@@ -925,6 +928,7 @@ def main():
             seed=args.seed,
             data=args.data,
             image=args.image,
+            max_steps=args.max_steps,
         )
 
     elif args.mode == "learn":

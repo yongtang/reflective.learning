@@ -38,7 +38,7 @@ def test_sequence():
     )
 
     # Updated assertions for torch.Tensor return type
-    tokens = tokens.squeeze(0)
+    tokens = tokens
     assert isinstance(tokens, torch.Tensor)
     assert tokens.shape[0] > 0
     if 0 in tokens:
