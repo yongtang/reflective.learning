@@ -109,10 +109,10 @@ class ReflectiveCore(nn.Module):
 
     def loss(
         self,
-        logit: torch.Tensor,  # [B, V, S] predicted logit.
-        token: torch.Tensor,  # [B] – token index per sequence.
-        state: torch.Tensor,  # [B] – state index per sequence.
-        weight: torch.Tensor,  # [S] – importance weight per state.
+        logit: torch.Tensor,  # [B, V, S] predicted logit
+        token: torch.Tensor,  # [B] ground truth token index per sequence
+        state: torch.Tensor,  # [B] ground truth state index per sequence
+        weight: torch.Tensor,  # [S] desired state distribution (may be noisy or unnormalized)
     ) -> torch.Tensor:
         """
         Computes cross-entropy loss against a single (token, state) pair per sequence.
@@ -121,7 +121,9 @@ class ReflectiveCore(nn.Module):
             logit: [B, V, S] predicted logit.
             token: [B] ground truth token index per sequence.
             state: [B] ground truth state index per sequence.
-            weight: [S] importance weight per state.
+            weight: [S] desired state distribution
+        Cross-entropy loss with dynamic importance weighting based on batch empirical distribution
+        and user-specified desired state distribution.
 
         Returns:
             Scalar loss (cross entropy).
@@ -129,20 +131,28 @@ class ReflectiveCore(nn.Module):
 
         B, V, S = logit.shape
 
-        # Select the logits for the token - shape: [B, S]
+        # Step 1: Select the logits for the target token — shape [B, S]
         value = logit[torch.arange(B), token]
 
-        # Compute per-sample unweighted cross-entropy loss (no reduction), shape: [B]
+        # Step 2: Compute unweighted cross-entropy loss per sample — shape [B]
         loss = F.cross_entropy(value, state, reduction="none")
 
-        # Step 3: Normalize weight to mean 1.0
-        weight = torch.clamp(weight, min=0)
-        weight = weight / weight.mean()  # shape: [S]
+        # Step 3: Clamp and normalize desired distribution
+        desired = torch.clamp(weight, min=1e-6)
+        desired = desired / desired.sum()
 
-        # Select per-sample weight based on state labels, shape: [B]
+        # Step 4: Compute empirical state distribution from batch
+        count = torch.bincount(state, minlength=S).float()
+        empirical = count / count.sum()
+
+        # Step 5: Importance weight = desired / empirical, normalize to mean 1.0
+        weight = desired / (empirical + 1e-6)
+        weight = weight / weight.mean()
+
+        # Step 6: Gather per-sample weight [B]
         weight = weight[state]
 
-        # Step 5: Compute weighted mean loss
+        # Step 7: Apply weights and reduce
         return (loss * weight).mean()
 
     def collate(self, batch):
