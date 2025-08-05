@@ -32,7 +32,7 @@ facing_space = ["right", "down", "left", "up"]
 def f_step(step, max_steps):
     assert 0 < step, f"invalid step {step}"
 
-    return f"done:{step}" if step <= max_steps else f"fail:{max_steps}"
+    return f"success" if step <= max_steps else f"failure"
 
 
 def f_observation(env_size, steps):
@@ -244,8 +244,7 @@ def f_callback(
         # env_size, max_steps
         env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
-        weight = torch.tensor([1.0] * max_steps + [0.01])
-        weight = torch.nn.functional.normalize(weight, p=2, dim=0)
+        weight = torch.tensor(f_weight(info), device=device)
 
         entries = []
         for i in range(stub_batch):
@@ -586,14 +585,8 @@ def run_spin(seed, data, image, max_steps):
         "env": env_size,
         "max": max_steps,
         "vocab": {e.name: (action_space.index(e)) for e in action_space},
-        "state": {
-            f_step(step=e, max_steps=max_steps): (e - 1)
-            for e in range(1, max_steps + 1 + 1)
-        },
-        "weight": {
-            f_step(step=e, max_steps=max_steps): 1.0 if e <= max_steps else 0.01
-            for e in range(1, max_steps + 1 + 1)
-        },
+        "state": {"success": 0, "failure": 1},
+        "weight": {"success": 1.0, "failure": 0.01},
         "layer": {
             "d_model": 768,
             "nhead": 12,
