@@ -48,6 +48,8 @@ def test_train_sanity():
         dataset, batch_size=4, collate_fn=model.collate
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    weight = torch.tensor([1.0, 1.0])
+    conditioned = False
 
     tmpdir = tempfile.mkdtemp()
 
@@ -60,7 +62,8 @@ def test_train_sanity():
             model=model,
             loader=loader,
             optimizer=optimizer,
-            weight=torch.tensor([1.0, 1.0]),
+            weight=weight,
+            conditioned=conditioned,
             total=20,
             callback=f_callback,
             device=torch.device("cpu"),

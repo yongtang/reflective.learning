@@ -197,6 +197,7 @@ def f_inference(
     vocab,
     weight,
     maximum,
+    conditioned,
     prefix,
     device,
 ):
@@ -214,6 +215,7 @@ def f_inference(
         prefix=prefix,
         weight=weight,
         maximum=maximum,
+        conditioned=conditioned,
         device=device,
     )
 
@@ -245,6 +247,8 @@ def f_callback(
         env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
         weight = torch.tensor(f_weight(info), device=device)
+
+        conditioned = info["conditioned"]
 
         entries = []
         for i in range(stub_batch):
@@ -295,6 +299,7 @@ def f_callback(
             vocab=vocab,
             weight=weight,
             maximum=max_steps,
+            conditioned=conditioned,
             prefix=torch.stack([entry["prefix"] for entry in entries], dim=0),
             device=device,
         )
@@ -517,7 +522,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 count += 1
 
 
-def run_spin(seed, data, image, max_steps):
+def run_spin(seed, data, image, max_steps, conditioned):
     def f_fail(line):
         entry = json.loads(line)
         if not (0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1):
@@ -587,6 +592,7 @@ def run_spin(seed, data, image, max_steps):
         "vocab": {e.name: (action_space.index(e)) for e in action_space},
         "state": {"success": 0, "failure": 1},
         "weight": {"success": 1.0, "failure": 0.01},
+        "conditioned": conditioned,
         "layer": {
             "d_model": 768,
             "nhead": 12,
@@ -795,6 +801,7 @@ def run_learn(
             encoder=encoder,
         ),
         device=device,
+        conditioned=info["conditioned"],
     )
 
 
@@ -818,6 +825,8 @@ def run_play(goal, start, facing, model, device):
     weight = torch.tensor(f_weight(info), device=device)
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
+
+    conditioned = info["conditioned"]
 
     with tempfile.TemporaryDirectory() as image:
         entry_text = f_text(
@@ -848,6 +857,7 @@ def run_play(goal, start, facing, model, device):
             vocab=vocab,
             weight=weight,
             maximum=max_steps,
+            conditioned=conditioned,
             prefix=prefix,
             device=device,
         )
@@ -883,6 +893,7 @@ def main():
     spin_parser.add_argument("--data", required=True)
     spin_parser.add_argument("--image", required=True)
     spin_parser.add_argument("--max-steps", type=int, required=True)
+    spin_parser.add_argument("--conditioned", type=bool, required=True)
 
     # ---- learn mode ----
     learn_parser = subparsers.add_parser("learn", help="Learn mode")
@@ -922,6 +933,7 @@ def main():
             data=args.data,
             image=args.image,
             max_steps=args.max_steps,
+            conditioned=args.conditioned,
         )
 
     elif args.mode == "learn":

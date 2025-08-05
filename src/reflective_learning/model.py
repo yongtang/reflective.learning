@@ -45,6 +45,7 @@ class ReflectiveCore(nn.Module):
         token: torch.Tensor,  # [B, T]
         prefix: torch.Tensor,  # [B, C, D]
         mask: torch.Tensor = None,
+        state: torch.Tensor = None,  # [B], optional: if given, returns logits conditioned on state
     ) -> torch.Tensor:
         """
         Forward pass using token/state indices and prefix.
@@ -67,16 +68,19 @@ class ReflectiveCore(nn.Module):
         x = self.input_linear(x)  # [B, T, D]
         x = torch.cat([prefix, x], dim=1)  # [B, C+T, D]
 
-        return self.call(mask=mask, embed=x)  # [B, V, S]
+        return self.call(mask=mask, embed=x, state=state)  # [B, V, S] or [B, V]
 
-    def call(self, mask: torch.Tensor, embed: torch.Tensor) -> torch.Tensor:
+    def call(
+        self, mask: torch.Tensor, embed: torch.Tensor, state: torch.Tensor = None
+    ) -> torch.Tensor:
         """
         Forward pass for precomputed embeddings.
         Args:
             mask:  [B, T]
             embed: [B, T, D]
+            state: Optional [B] — if provided, returns token logits [B, V] for the given state
         Returns:
-            [B, V, S] logit at final position
+            [B, V, S] if state is None, else [B, V]
         """
         B, T, D = embed.shape
 
@@ -104,21 +108,25 @@ class ReflectiveCore(nn.Module):
         # Output projection to joint token-state logits
         logit = self.output_linear(x)  # [B, T, V × S]
         logit = logit.view(B, T, self.vocab_size, self.state_size)
+        logit = logit[:, -1]  # [B, V, S] — final token position
 
-        return logit[:, -1]  # [B, V, S] — final token position
+        if state is not None:
+            return logit[torch.arange(B), :, state]  # [B, V]
+
+        return logit  # [B, V, S]
 
     def loss(
         self,
-        logit: torch.Tensor,  # [B, V, S] predicted logit
-        token: torch.Tensor,  # [B] ground truth token index per sequence
-        state: torch.Tensor,  # [B] ground truth state index per sequence
+        logit: torch.Tensor,  # [B, V, S] or [B, V]
+        token: torch.Tensor,  # [B] ground truth token index per sequence.
+        state: torch.Tensor,  # [B] ground truth state index per sequence.
         weight: torch.Tensor,  # [S] desired state distribution (may be noisy or unnormalized)
     ) -> torch.Tensor:
         """
         Computes cross-entropy loss against a single (token, state) pair per sequence.
 
         Args:
-            logit: [B, V, S] predicted logit.
+            logit: [B, V, S] or [B, V] predicted logit.
             token: [B] ground truth token index per sequence.
             state: [B] ground truth state index per sequence.
             weight: [S] desired state distribution
@@ -129,24 +137,30 @@ class ReflectiveCore(nn.Module):
             Scalar loss (cross entropy).
         """
 
-        B, V, S = logit.shape
+        # Case 1: joint logits [B, V, S] → cross-entropy over state given token
+        # Case 2: token-only logits [B, V] → cross-entropy over token directly
+        if logit.dim() == 3:
+            # Step 1: Select the logits for the target token — shape [B, S]
+            value = logit[torch.arange(logit.size(0)), token]
+            # Step 2: Compute unweighted cross-entropy loss per sample — shape [B]
+            loss = F.cross_entropy(value, state, reduction="none")
+        else:
+            # Step 1–2: Direct cross-entropy over tokens — shape [B]
+            loss = F.cross_entropy(logit, token, reduction="none")
 
-        # Step 1: Select the logits for the target token — shape [B, S]
-        value = logit[torch.arange(B), token]
-
-        # Step 2: Compute unweighted cross-entropy loss per sample — shape [B]
-        loss = F.cross_entropy(value, state, reduction="none")
+        B = token.size(0)
+        S = weight.size(0)
 
         # Step 3: Clamp and normalize desired distribution
-        desired = torch.clamp(weight, min=1e-6)
-        desired = desired / desired.sum()
+        weight = torch.clamp(weight, min=1e-6)
+        weight = weight / weight.sum()
 
         # Step 4: Compute empirical state distribution from batch
         count = torch.bincount(state, minlength=S).float()
         empirical = count / count.sum()
 
         # Step 5: Importance weight = desired / empirical, normalize to mean 1.0
-        weight = desired / (empirical + 1e-6)
+        weight = weight / (empirical + 1e-6)
         weight = weight / weight.mean()
 
         # Step 6: Gather per-sample weight [B]

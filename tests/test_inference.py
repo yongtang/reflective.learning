@@ -28,12 +28,14 @@ def test_sequence():
     prefix = torch.randn(4, 16)  # [C, d_model]
     weight = torch.tensor([0.7, 0.3])  # [S]
     maximum = 10
+    conditioned = False
 
     tokens = sequence(
         model=model,
         prefix=prefix,
         weight=weight,
         maximum=maximum,
+        conditioned=conditioned,
         device="cpu",
     )
 

@@ -11,6 +11,7 @@ def train(
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     weight: torch.Tensor,
+    conditioned: bool,
     total: int,
     callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
     device: Optional[torch.device] = None,
@@ -23,6 +24,7 @@ def train(
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
         weight: Weights of the desired states.
+        conditioned: If True, use state-conditioned P(token | state) loss
         total: Total number of training samples to process.
         callback: A function called periodically during training.
         device: Optional device override (defaults to CUDA if available).
@@ -66,7 +68,11 @@ def train(
                 state_label = state_label[:chunk]
 
             # Forward pass (model returns logit at final position)
-            logit = model.call(mask=mask, embed=embed)  # [B, V, S]
+            if conditioned:
+                logit = model.call(mask=mask, embed=embed, state=state_label)  # [B, V]
+            else:
+                logit = model.call(mask=mask, embed=embed)  # [B, V, S]
+
             loss = model.loss(logit, token_label, state_label, weight)
             loss_value = loss.item()
 
