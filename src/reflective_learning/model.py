@@ -85,29 +85,25 @@ class ReflectiveCore(nn.Module):
         """
         B, T, D = embed.shape
 
-        # Default mask: all positions valid
-        if mask is None:
-            mask = torch.ones((B, T), dtype=torch.bool, device=embed.device)
-
         # Positional embedding
         pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
-        x = embed + self.pos_embedding(pos)  # [B, T, D]
+        value = embed + self.pos_embedding(pos)  # [B, T, D]
 
         # Padding mask: [B, T], True = PAD — so invert `mask`
-        src_key_padding_mask = ~mask
+        src_key_padding_mask = ~mask  # [B, T]
 
         # Causal mask: [T, T], True = masked
         mask = torch.triu(torch.ones(T, T, device=embed.device), diagonal=1).bool()
 
         # Transformer: decoder-only via TransformerEncoder + causal mask
-        x = self.decoder(
-            src=x,
+        value = self.decoder(
+            src=value,
             mask=mask,
             src_key_padding_mask=src_key_padding_mask,
         )  # shape [B, T, D]
 
         # Output projection to token logits
-        logit = self.output_linear(x)  # [B, T, V]
+        logit = self.output_linear(value)  # [B, T, V]
 
         return logit
 
@@ -186,7 +182,9 @@ class ReflectiveCore(nn.Module):
             token_list.append(
                 token
             )  # target tokens: predict token[t+1] from prefix + token[:t]
-            mask_list.append(torch.ones(value.shape[0], dtype=torch.bool, device=device))
+            mask_list.append(
+                torch.ones(value.shape[0], dtype=torch.bool, device=device)
+            )
             state_list.append(state)
             index_list.append(torch.tensor(prefix.shape[0], device=device))  # scalar
 
