@@ -5,7 +5,7 @@ import tempfile
 import torch
 
 from reflective_learning.model import ReflectiveCore
-from reflective_learning.train import train
+from reflective_learning.train import pretrain
 
 
 class DummyDataset(torch.utils.data.Dataset):
@@ -22,7 +22,7 @@ class DummyDataset(torch.utils.data.Dataset):
         return {
             "token": torch.randint(1, self.vocab_size, (T,)),  # [T]
             "state": torch.randint(0, self.state_size, []),  # []
-            "prefix": torch.randn(3, self.d_model),  # [C, d_model]
+            "prefix": torch.randn(3, self.d_model),  # [C, D]
         }
 
 
@@ -37,7 +37,6 @@ def test_train_sanity():
     )
     model = ReflectiveCore(
         vocab_size=10,
-        state_size=2,
         max_seq_len=16,
         max_prefix_len=8,
         decoder=decoder,
@@ -56,7 +55,7 @@ def test_train_sanity():
             pass
 
     try:
-        train(
+        pretrain(
             model=model,
             loader=loader,
             optimizer=optimizer,

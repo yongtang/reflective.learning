@@ -6,11 +6,11 @@ from tqdm import tqdm
 from reflective_learning.model import ReflectiveCore
 
 
-def train(
+def pretrain(
     model: ReflectiveCore,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    weight: torch.Tensor,
+    weight: torch.Tensor,  # [S] — state → weight
     total: int,
     callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
     device: Optional[torch.device] = None,
@@ -38,6 +38,7 @@ def train(
 
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
+    weight = weight.to(device)  # ensure it's on the right device
 
     count = 0
 
@@ -52,21 +53,22 @@ def train(
             model.train()
 
             # Move batch to device
-            mask = batch["mask"].to(device)  # [B, L, L]
-            embed = batch["embed"].to(device)  # [B, L, d_model]
-            token_label = batch["token"].to(device)  # [B] — one token per example
+            mask = batch["mask"].to(device)  # [B, L]
+            embed = batch["embed"].to(device)  # [B, L, D]
+            token_label = batch["token"].to(device)  # [B, T]
             state_label = batch["state"].to(device)  # [B]
 
             if count + embed.size(0) > total:
                 chunk = total - count
-
                 mask = mask[:chunk]
                 embed = embed[:chunk]
                 token_label = token_label[:chunk]
                 state_label = state_label[:chunk]
 
-            # Forward pass (model returns logit at final position)
-            logit = model.call(mask=mask, embed=embed)  # [B, V, S]
+            # Forward pass (model returns [B, T, V])
+            logit = model.call(mask=mask, embed=embed)  # [B, C+T, V]
+            prefix_len = embed.size(1) - token_label.size(1)
+            logit = logit[:, prefix_len:, :]  # Strip prefix
             loss = model.loss(logit, token_label, state_label, weight)
             loss_value = loss.item()
 

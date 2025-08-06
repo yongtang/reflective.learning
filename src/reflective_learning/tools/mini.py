@@ -18,7 +18,7 @@ from tqdm import tqdm
 from reflective_learning.encoder import ContextEncoder
 from reflective_learning.inference import sequence
 from reflective_learning.model import ReflectiveCore
-from reflective_learning.train import train
+from reflective_learning.train import pretrain
 
 action_space = [
     minigrid.core.actions.Actions.done,
@@ -135,7 +135,6 @@ def f_model(info):
 
     state_indices = sorted(info["state"].values())
     assert state_indices == list(range(len(state_indices))), f"{info['state']}"
-    state_size = len(state_indices)
 
     max_seq_len = info["max"]
     max_prefix_len = 512
@@ -150,7 +149,6 @@ def f_model(info):
 
     model = ReflectiveCore(
         vocab_size=vocab_size,
-        state_size=state_size,
         max_seq_len=max_seq_len,
         max_prefix_len=max_prefix_len,
         decoder=decoder,
@@ -195,29 +193,24 @@ def f_image(env_size, max_steps, goal, start, facing, image):
 def f_inference(
     model,
     vocab,
-    weight,
     maximum,
     prefix,
     device,
 ):
-    def f(token):
-        action = token.tolist()
-        action = action[: action.index(0) + 1] if 0 in action else action
-
-        symbol = {v: k for k, v in vocab.items()}
-        action = [symbol[e] for e in action]
-
-        return action
 
     token = sequence(
         model=model,
         prefix=prefix,
-        weight=weight,
         maximum=maximum,
         device=device,
     )
+    action = token.tolist()
+    action = action[: action.index(0) + 1] if 0 in action else action
 
-    return [f(e) for e in token] if prefix.dim() == 3 else f(token)
+    symbol = {v: k for k, v in vocab.items()}
+    action = [symbol[e] for e in action]
+
+    return action
 
 
 def f_callback(
@@ -279,43 +272,31 @@ def f_callback(
                 database=database,
                 image=image,
             )
-            entries.append(
-                {
-                    "goal": goal,
-                    "start": start,
-                    "facing": facing,
-                    "text": entry_text,
-                    "image": entry_image,
-                    "prefix": prefix,
-                }
+
+            action = f_inference(
+                model=model,
+                vocab=vocab,
+                maximum=max_steps,
+                prefix=prefix,
+                device=device,
             )
 
-        action = f_inference(
-            model=model,
-            vocab=vocab,
-            weight=weight,
-            maximum=max_steps,
-            prefix=torch.stack([entry["prefix"] for entry in entries], dim=0),
-            device=device,
-        )
-
-        for i in range(stub_batch):
             state = f_step(
                 step=f_replay(
                     env_size=env_size,
                     max_steps=max_steps,
-                    goal=entries[i]["goal"],
-                    start=entries[i]["start"],
-                    facing=entries[i]["facing"],
-                    action=action[i],
+                    goal=goal,
+                    start=start,
+                    facing=facing,
+                    action=action,
                 ),
                 max_steps=max_steps,
             )
 
             entry = {
-                "text": entries[i]["text"],
-                "image": entries[i]["image"],
-                "token": action[i],
+                "text": entry_text,
+                "image": entrie_image,
+                "token": action,
                 "state": state,
             }
 
@@ -462,11 +443,11 @@ class IterableDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         while True:
-            selection = random.randint(0, self.seed_total + self.stub_total - 1)
-            if selection < self.seed_total:
+            if random.random() < 0.5:
+                selection = random.randint(0, self.seed_total - 1)
                 selection = f"seed_{selection:08d}".encode()
             else:
-                selection = selection - self.seed_total
+                selection = random.randint(0, self.stub_total - 1)
                 selection = f"stub_{selection:08d}".encode()
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
@@ -586,7 +567,7 @@ def run_spin(seed, data, image, max_steps):
         "max": max_steps,
         "vocab": {e.name: (action_space.index(e)) for e in action_space},
         "state": {"success": 0, "failure": 1},
-        "weight": {"success": 1.0, "failure": 0.01},
+        "weight": {"success": 1.0, "failure": 0.1},
         "layer": {
             "d_model": 768,
             "nhead": 12,
@@ -617,7 +598,7 @@ def run_spin(seed, data, image, max_steps):
         with open(seed, "r") as g:
             with tqdm(
                 total=total,
-                desc="Spin learn",
+                desc="Seed entry",
                 dynamic_ncols=True,
                 bar_format=bar_format,
                 unit="seed",
@@ -680,7 +661,7 @@ def run_spin(seed, data, image, max_steps):
     print(f"Save model: {os.path.join(data, 'model.pt')}")
 
 
-def run_learn(
+def run_pretrain(
     data,
     image,
     total,
@@ -727,20 +708,11 @@ def run_learn(
                     progress.update(len(line.encode("utf-8")))
                     if line.strip():
                         entry = json.loads(line)
-                        for data_index in range(len(entry["token"])):
-                            data_entry = json.dumps(
-                                {
-                                    "text": entry["text"],
-                                    "image": entry["image"],
-                                    "token": entry["token"][: data_index + 1],
-                                    "state": entry["state"],
-                                },
-                                sort_keys=True,
-                            )
-                            transaction.put(
-                                f"seed_{seed_total:08d}".encode(), data_entry.encode()
-                            )
-                            seed_total += 1
+                        data_entry = json.dumps(entry, sort_keys=True)
+                        transaction.put(
+                            f"seed_{seed_total:08d}".encode(), data_entry.encode()
+                        )
+                        seed_total += 1
 
         with open(os.path.join(data, "stub.data"), "w") as f:
             with tqdm(
@@ -776,7 +748,7 @@ def run_learn(
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    train(
+    pretrain(
         model=model,
         loader=loader,
         optimizer=optimizer,
@@ -846,7 +818,6 @@ def run_play(goal, start, facing, model, device):
         action = f_inference(
             model=model,
             vocab=vocab,
-            weight=weight,
             maximum=max_steps,
             prefix=prefix,
             device=device,
@@ -884,18 +855,18 @@ def main():
     spin_parser.add_argument("--image", required=True)
     spin_parser.add_argument("--max-steps", type=int, required=True)
 
-    # ---- learn mode ----
-    learn_parser = subparsers.add_parser("learn", help="Learn mode")
-    learn_parser.add_argument("--data", required=True)
-    learn_parser.add_argument("--image", required=True)
-    learn_parser.add_argument("--total", type=int, required=True)
-    learn_parser.add_argument("--batch", type=int, required=True)
-    learn_parser.add_argument("--reservoir", type=int, required=True)
-    learn_parser.add_argument("--stub-batch", type=int, required=True)
-    learn_parser.add_argument("--stub-interval", type=int, required=True)
-    learn_parser.add_argument("--save-interval", type=int, required=True)
-    learn_parser.add_argument("--lr", type=float, required=True)
-    learn_parser.add_argument("--device")
+    # ---- pretrain mode ----
+    pretrain_parser = subparsers.add_parser("pretrain", help="Pretrain mode")
+    pretrain_parser.add_argument("--data", required=True)
+    pretrain_parser.add_argument("--image", required=True)
+    pretrain_parser.add_argument("--total", type=int, required=True)
+    pretrain_parser.add_argument("--batch", type=int, required=True)
+    pretrain_parser.add_argument("--reservoir", type=int, required=True)
+    pretrain_parser.add_argument("--stub-batch", type=int, required=True)
+    pretrain_parser.add_argument("--stub-interval", type=int, required=True)
+    pretrain_parser.add_argument("--save-interval", type=int, required=True)
+    pretrain_parser.add_argument("--lr", type=float, required=True)
+    pretrain_parser.add_argument("--device")
 
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Perform mode")
@@ -924,8 +895,8 @@ def main():
             max_steps=args.max_steps,
         )
 
-    elif args.mode == "learn":
-        run_learn(
+    elif args.mode == "pretrain":
+        run_pretrain(
             data=args.data,
             image=args.image,
             total=args.total,
