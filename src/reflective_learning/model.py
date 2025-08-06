@@ -55,21 +55,26 @@ class ReflectiveCore(nn.Module):
         assert prefix is not None, "prefix is required"
         T = token.shape[0]
         V = self.vocab_size
+        C = prefix.shape[0]
+        D = self.d_model
 
         # One-hot encode token
-        x = F.one_hot(token, num_classes=V).float()  # [T, V]
+        value = F.one_hot(token, num_classes=V).float()  # [T, V]
 
         # Input projection
-        x = self.input_linear(x)  # [T, D]
+        value = self.input_linear(value)  # [T, D]
 
         # Prepend prefix
-        x = torch.cat([prefix, x], dim=0)  # [C+T, D]
+        value = torch.cat([prefix, value], dim=0)  # [C+T, D]
 
         # Add batch dimension
-        x = x.unsqueeze(0)  # [1, C+T, D]
+        value = value.unsqueeze(0)  # [1, C+T, D]
+
+        # Construct mask: 1s for all positions
+        mask = torch.ones(1, C + T, dtype=torch.bool, device=value.device)  # [1, C+T]
 
         # Call transformer
-        logit = self.call(mask=None, embed=x)  # [1, C+T, V]
+        logit = self.call(mask=mask, embed=value)  # [1, C+T, V]
 
         # Return logits for final token position
         return logit[0, -1]  # [V]
