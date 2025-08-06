@@ -158,7 +158,7 @@ class ReflectiveCore(nn.Module):
         Returns:
             A dict with:
                 - "mask":  BoolTensor [B, L] — attention mask for valid input embeddings
-                - "embed": FloatTensor [B, L, D] — input embeddings (prefix + tokens)
+                - "embed": FloatTensor [B, L, D] — input embeddings (prefix + tokens[:-1])
                 - "token": LongTensor [B, T] — full token sequence
                 - "state": LongTensor [B] — state per example
         """
@@ -174,14 +174,16 @@ class ReflectiveCore(nn.Module):
             state = entry["state"].to(device)  # scalar
 
             T = token.size(0)
-            assert T >= 1, "Token sequence must have at least 1 token"
+            assert T > 0, "Token sequence must have at least 1 token"
 
-            x = F.one_hot(token, num_classes=V).float()  # [T, V]
-            x = self.input_linear(x)  # [T, D]
-            full = torch.cat([prefix, x], dim=0)  # [C + T, D]
+            input_token = token[:-1]  # [T - 1]
+
+            x = F.one_hot(input_token, num_classes=V).float()  # [T - 1, V]
+            x = self.input_linear(x)  # [T - 1, D]
+            full = torch.cat([prefix, x], dim=0)  # [C + T - 1, D]
 
             embed.append(full)
-            token_list.append(token)  # full token sequence
+            token_list.append(token)  # full token sequence (used to target token[1:])
             mask.append(torch.ones(full.shape[0], dtype=torch.bool, device=device))
             state_list.append(state)
 
@@ -193,8 +195,8 @@ class ReflectiveCore(nn.Module):
         state = torch.stack(state_list)  # [B]
 
         return {
-            "mask": mask,  # [B, L]
+            "mask": mask,  # [B, L] — for prefix + input tokens
             "embed": embed,  # [B, L, D]
-            "token": token,  # [B, T]
+            "token": token,  # [B, T] — full token sequence, including token[0]
             "state": state,  # [B]
         }
