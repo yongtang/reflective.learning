@@ -133,7 +133,7 @@ class ReflectiveCore(nn.Module):
         B, T, V = logit.shape
 
         # Use all logits to predict all tokens (including token[0])
-        pred = logit.reshape(-1, V)  # [B*T, V]
+        pred = logit[:, -token.size(1) :, :].reshape(-1, V)  # [B*T, V]
         target = token.reshape(-1)  # [B*T]
 
         loss = F.cross_entropy(pred, target, reduction="none")  # [B*T]
@@ -183,7 +183,7 @@ class ReflectiveCore(nn.Module):
             full = torch.cat([prefix, x], dim=0)  # [C + T - 1, D]
 
             embed.append(full)
-            token_list.append(token)  # full token sequence (used to target token[1:])
+            token_list.append(token)  # target tokens: predict token[t] from prefix + token[:t]
             mask.append(torch.ones(full.shape[0], dtype=torch.bool, device=device))
             state_list.append(state)
 

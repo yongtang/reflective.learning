@@ -67,8 +67,7 @@ def pretrain(
 
             # Forward pass (model returns [B, T, V])
             logit = model.call(mask=mask, embed=embed)  # [B, C+T, V]
-            prefix_len = embed.size(1) - token_label.size(1)
-            logit = logit[:, prefix_len:, :]  # Strip prefix
+            logit = logit[:, -token_label.size(1) :, :]
             loss = model.loss(logit, token_label, state_label, weight)
             loss_value = loss.item()
 
