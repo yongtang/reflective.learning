@@ -57,6 +57,7 @@ def pretrain(
             embed = batch["embed"].to(device)  # [B, L, D]
             token_label = batch["token"].to(device)  # [B, T]
             state_label = batch["state"].to(device)  # [B]
+            index = batch["index"].to(device)  # [B]
 
             if count + embed.size(0) > total:
                 chunk = total - count
@@ -64,11 +65,18 @@ def pretrain(
                 embed = embed[:chunk]
                 token_label = token_label[:chunk]
                 state_label = state_label[:chunk]
+                index = index[:chunk]
 
-            # Forward pass (model returns [B, T, V])
-            logit = model.call(mask=mask, embed=embed)  # [B, C+T, V]
-            logit = logit[:, -token_label.size(1) :, :]
-            loss = model.loss(logit, token_label, state_label, weight)
+            # Forward pass (model returns [B, L, V])
+            logit = model.call(mask=mask, embed=embed)  # [B, L, V]
+            loss = model.loss(
+                logit=logit,
+                token=token_label,
+                state=state_label,
+                weight=weight,
+                index=index,
+                mask=mask,
+            )
             loss_value = loss.item()
 
             # Backpropagation
