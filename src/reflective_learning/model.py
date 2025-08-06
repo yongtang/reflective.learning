@@ -114,38 +114,55 @@ class ReflectiveCore(nn.Module):
 
     def loss(
         self,
-        logit: torch.Tensor,  # [B, T, V] predicted logits
+        logit: torch.Tensor,  # [B, L, V] predicted logits for prefix + token
         token: torch.Tensor,  # [B, T] ground truth token indices
         state: torch.Tensor,  # [B] ground truth state indices
-        weight: torch.Tensor,  # [S] weight per state
+        weight: torch.Tensor,  # [S] weight per state (e.g. success=1.0, failure=0.1)
+        index: torch.Tensor,  # [B] index where token sequence begins
+        mask: torch.Tensor,  # [B, L] attention mask for [prefix + token]
     ) -> torch.Tensor:
         """
         Computes cross-entropy loss for next-token prediction, with per-state weighting.
 
         Args:
-            logit: [B, T, V] predicted logits at each position.
+            logit: [B, L, V] predicted logits for prefix + token.
             token: [B, T] ground truth token indices.
             state: [B] ground truth state per example.
             weight: [S] weight per state (e.g. success=1.0, failure=0.1)
+            index: [B] index where token sequence starts in logits.
+            mask:  [B, L] boolean mask for valid positions in logits.
 
         Returns:
             Scalar loss (cross entropy).
         """
-        B, T, V = logit.shape
+        B, L, V = logit.shape
+        T = token.shape[1]
 
-        # Use all logits to predict all tokens (including token[0])
-        pred = logit[:, -token.size(1) :, :].reshape(-1, V)  # [B*T, V]
-        target = token.reshape(-1)  # [B*T]
+        # Create position index for each logit position
+        position = (
+            torch.arange(L, device=logit.device).unsqueeze(0).expand(B, L)
+        )  # [B, L]
 
-        loss = F.cross_entropy(pred, target, reduction="none")  # [B*T]
+        # Compute token mask: True only where position >= index and mask is valid
+        token_mask = (position >= index.unsqueeze(1)) & mask  # [B, L]
 
-        # Convert state → per-example weight → per-token weight
-        weight = torch.clamp(weight, min=0.0)  # [S]
-        weight = weight[state]  # [B]
-        weight = weight.unsqueeze(1).expand(-1, T).reshape(-1)  # [B*T]
+        # Total number of token positions (for averaging)
+        token_count = token_mask.sum()
 
-        loss = loss * weight
-        return loss.mean()
+        # Extract logits at token positions (i.e., final T positions per sample)
+        token_logit = logit[token_mask]  # [total_token, V]
+        target = token[token != 0]  # [total_token], skips padding
+
+        # Compute per-token cross entropy
+        loss = F.cross_entropy(token_logit, target, reduction="none")  # [total_token]
+
+        # Expand state → per-token weights
+        token_weight = weight[state].unsqueeze(1).expand_as(token_mask)  # [B, L]
+        token_weight = token_weight[token_mask]  # [total_token]
+
+        # Final weighted loss
+        loss = loss * token_weight
+        return loss.sum() / token_count.clamp(min=1)
 
     def collate(self, batch):
         """
