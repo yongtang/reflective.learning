@@ -158,45 +158,52 @@ class ReflectiveCore(nn.Module):
         Returns:
             A dict with:
                 - "mask":  BoolTensor [B, L] — attention mask for valid input embeddings
-                - "embed": FloatTensor [B, L, D] — input embeddings (prefix + tokens[:-1])
+                - "embed": FloatTensor [B, L, D] — input embeddings (prefix + tokens)
                 - "token": LongTensor [B, T] — full token sequence
                 - "state": LongTensor [B] — state per example
+                - "index": LongTensor [B] — index where token embeddings begin in logits
         """
         device = next(self.parameters()).device
         D = self.d_model
         V = self.vocab_size
 
-        embed, token_list, mask, state_list = [], [], [], []
+        embed_list, token_list, mask_list, state_list = [], [], [], []
+        index_list = []
 
         for entry in batch:
-            token = entry["token"].to(device)  # [T]
             prefix = entry["prefix"].to(device)  # [C, D]
-            state = entry["state"].to(device)  # scalar
+            token = entry["token"].to(device)  # [T]
+            state = entry["state"].to(device)  # []
 
             T = token.size(0)
             assert T > 0, "Token sequence must have at least 1 token"
 
-            input_token = token[:-1]  # [T - 1]
+            value = F.one_hot(token, num_classes=V).float()  # [T, V]
+            value = self.input_linear(value)  # [T, D]
+            value = torch.cat([prefix, value], dim=0)  # [C + T, D]
 
-            x = F.one_hot(input_token, num_classes=V).float()  # [T - 1, V]
-            x = self.input_linear(x)  # [T - 1, D]
-            full = torch.cat([prefix, x], dim=0)  # [C + T - 1, D]
-
-            embed.append(full)
-            token_list.append(token)  # target tokens: predict token[t] from prefix + token[:t]
-            mask.append(torch.ones(full.shape[0], dtype=torch.bool, device=device))
+            embed_list.append(value)
+            token_list.append(
+                token
+            )  # target tokens: predict token[t+1] from prefix + token[:t]
+            mask_list.append(torch.ones(value.shape[0], dtype=torch.bool, device=device))
             state_list.append(state)
+            index_list.append(torch.tensor(prefix.shape[0], device=device))  # scalar
 
-        embed = torch.nn.utils.rnn.pad_sequence(embed, batch_first=True)  # [B, L, D]
+        embed = torch.nn.utils.rnn.pad_sequence(
+            embed_list, batch_first=True
+        )  # [B, L, D]
         token = torch.nn.utils.rnn.pad_sequence(
             token_list, batch_first=True, padding_value=0
         )  # [B, T]
-        mask = torch.nn.utils.rnn.pad_sequence(mask, batch_first=True)  # [B, L]
+        mask = torch.nn.utils.rnn.pad_sequence(mask_list, batch_first=True)  # [B, L]
         state = torch.stack(state_list)  # [B]
+        index = torch.stack(index_list)  # [B]
 
         return {
-            "mask": mask,  # [B, L] — for prefix + input tokens
+            "mask": mask,  # [B, L] — attention mask for valid input embeddings
             "embed": embed,  # [B, L, D]
             "token": token,  # [B, T] — full token sequence, including token[0]
             "state": state,  # [B]
+            "index": index,  # [B] — where token logits begin in output
         }
