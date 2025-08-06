@@ -118,51 +118,60 @@ class ReflectiveCore(nn.Module):
         token: torch.Tensor,  # [B, T] ground truth token indices
         state: torch.Tensor,  # [B] ground truth state indices
         weight: torch.Tensor,  # [S] weight per state (e.g. success=1.0, failure=0.1)
-        index: torch.Tensor,  # [B] index where token sequence begins
-        mask: torch.Tensor,  # [B, L] attention mask for [prefix + token]
+        index: torch.Tensor,  # [B] index where token sequence begins (first token position)
+        mask: torch.Tensor,  # [B, L] boolean mask for valid positions in logits
     ) -> torch.Tensor:
         """
         Computes cross-entropy loss for next-token prediction, with per-state weighting.
 
         Args:
             logit: [B, L, V] predicted logits for prefix + token.
-            token: [B, T] ground truth token indices.
+                   Each position logit[b, t] predicts token[b, t + 1].
+            token: [B, T] ground truth token indices (shifted right vs logits).
             state: [B] ground truth state per example.
             weight: [S] weight per state (e.g. success=1.0, failure=0.1)
-            index: [B] index where token sequence starts in logits.
+            index: [B] index where token sequence starts in logits (i.e. position of token[0]).
             mask:  [B, L] boolean mask for valid positions in logits.
 
         Returns:
-            Scalar loss (cross entropy).
+            Scalar loss (cross entropy), averaged over valid tokens and weighted by state.
         """
-        B, L, V = logit.shape
-        T = token.shape[1]
+        B = logit.size(0)  # batch size
 
-        # Create position index for each logit position
-        position = (
-            torch.arange(L, device=logit.device).unsqueeze(0).expand(B, L)
-        )  # [B, L]
+        total_loss = 0.0
+        total_weight = 0.0
 
-        # Compute token mask: True only where position >= index and mask is valid
-        token_mask = (position >= index.unsqueeze(1)) & mask  # [B, L]
+        for i in range(B):
+            # Index[i] is the position of token[0] in the sequence.
+            # The model predicts token[0] from position index[i] - 1
+            start = index[i].item() - 1  # Position in logits that predicts token[0]
 
-        # Total number of token positions (for averaging)
-        token_count = token_mask.sum()
+            mask_i = mask[i]  # [L], mask for this sample
 
-        # Extract logits at token positions (i.e., final T positions per sample)
-        token_logit = logit[token_mask]  # [total_token, V]
-        target = token[token != 0]  # [total_token], skips padding
+            # Count how many valid tokens are predicted starting from start+1 to end of sequence
+            count_i = (
+                (mask_i[start + 1 :]).sum().item()
+            )  # how many predicted tokens to score
 
-        # Compute per-token cross entropy
-        loss = F.cross_entropy(token_logit, target, reduction="none")  # [total_token]
+            # Slice predicted logits from model output for this example
+            # These predict token[0] ... token[count_i - 1]
+            logit_i = logit[i, start : start + count_i]  # [count_i, V]
 
-        # Expand state → per-token weights
-        token_weight = weight[state].unsqueeze(1).expand_as(token_mask)  # [B, L]
-        token_weight = token_weight[token_mask]  # [total_token]
+            # Corresponding ground truth tokens
+            token_target = token[i, :count_i]  # [count_i]
 
-        # Final weighted loss
-        loss = loss * token_weight
-        return loss.sum() / token_count.clamp(min=1)
+            # Get scalar weight for this example based on its state
+            state_weight = weight[state[i]]  # scalar
+
+            # Compute cross entropy loss over valid predicted tokens
+            loss_i = F.cross_entropy(logit_i, token_target, reduction="sum")  # scalar
+
+            # Weight loss by state and accumulate
+            total_loss += loss_i * state_weight
+            total_weight += count_i * state_weight
+
+        # Return average loss per valid token, weighted by state
+        return total_loss / total_weight
 
     def collate(self, batch):
         """
