@@ -53,7 +53,8 @@ def test_reflective_transformer_forward_and_loss():
     pad = torch.zeros(batch_size, max_prefix_len, dtype=torch.long)
     full_label = torch.cat([pad, label], dim=1)  # [B, C+T-1]
 
-    loss = model.loss(logit, full_label, state, weights)
+    index = torch.full((batch_size,), max_prefix_len, dtype=torch.long)  # [B]
+    loss = model.loss(logit, full_label, state, weights, index, mask)
     assert loss.item() > 0
 
 
