@@ -7,17 +7,15 @@ class ReflectiveCore(nn.Module):
     def __init__(
         self,
         vocab_size: int,
-        state_size: int,
         max_seq_len: int,
         max_prefix_len: int,
         decoder: nn.TransformerEncoder,
     ):
         """
-        ReflectiveCore Transformer model that predicts P(token | context, state).
+        ReflectiveCore Transformer model that predicts P(token | context).
 
         Args:
             vocab_size: Number of token classes.
-            state_size: Number of mutually exclusive state classes.
             max_seq_len: Max token sequence length (for position embeddings).
             max_prefix_len: Max prefix length (prepended to each sequence).
             decoder: Standard nn.TransformerEncoder module.
@@ -26,14 +24,13 @@ class ReflectiveCore(nn.Module):
 
         d_model = decoder.layers[0].linear1.in_features
         self.vocab_size = vocab_size
-        self.state_size = state_size
         self.d_model = d_model
 
-        # Project one-hot token × state to d_model
+        # Project one-hot token to d_model
         self.input_linear = nn.Linear(vocab_size, d_model)
 
-        # Output logit over joint token-state space
-        self.output_linear = nn.Linear(d_model, vocab_size * state_size)
+        # Output logit over token vocabulary
+        self.output_linear = nn.Linear(d_model, vocab_size)
 
         # Positional embeddings for prefix + sequence
         self.pos_embedding = nn.Embedding(max_seq_len + max_prefix_len, d_model)
@@ -42,32 +39,45 @@ class ReflectiveCore(nn.Module):
 
     def forward(
         self,
-        token: torch.Tensor,  # [B, T]
-        prefix: torch.Tensor,  # [B, C, D]
-        mask: torch.Tensor = None,
+        token: torch.Tensor,  # [T]
+        prefix: torch.Tensor,  # [C, D]
     ) -> torch.Tensor:
         """
-        Forward pass using token/state indices and prefix.
+        Forward pass using token indices and prefix.
 
         Args:
-            token: [B, T] LongTensor of token indices.
-            prefix: [B, C, D] prefix embeddings to prepend.
-            mask: Optional attention mask.
+            token: [T] LongTensor of token indices.
+            prefix: [C, D] prefix embeddings to prepend.
 
         Returns:
-            [B, V, S] logit at the next position.
+            [V] logits for the final token position.
         """
         assert prefix is not None, "prefix is required"
-        B, T = token.shape
-        V, S = self.vocab_size, self.state_size
+        T = token.shape[0]
+        V = self.vocab_size
+        C = prefix.shape[0]
+        D = self.d_model
 
         # One-hot encode token
-        x = F.one_hot(token, num_classes=V).float()  # [B, T, V]
+        value = F.one_hot(token, num_classes=V).float()  # [T, V]
 
-        x = self.input_linear(x)  # [B, T, D]
-        x = torch.cat([prefix, x], dim=1)  # [B, C+T, D]
+        # Input projection
+        value = self.input_linear(value)  # [T, D]
 
-        return self.call(mask=mask, embed=x)  # [B, V, S]
+        # Prepend prefix
+        value = torch.cat([prefix, value], dim=0)  # [C+T, D]
+
+        # Add batch dimension
+        value = value.unsqueeze(0)  # [1, C+T, D]
+
+        # Construct mask: 1s for all positions
+        mask = torch.ones(1, C + T, dtype=torch.bool, device=value.device)  # [1, C+T]
+
+        # Call transformer
+        logit = self.call(mask=mask, embed=value)  # [1, C+T, V]
+
+        # Return logits for final token position
+        return logit[0, -1]  # [V]
 
     def call(self, mask: torch.Tensor, embed: torch.Tensor) -> torch.Tensor:
         """
@@ -76,84 +86,92 @@ class ReflectiveCore(nn.Module):
             mask:  [B, T]
             embed: [B, T, D]
         Returns:
-            [B, V, S] logit at final position
+            [B, T, V] logits at each position
         """
         B, T, D = embed.shape
 
-        # Default mask: all positions valid
-        if mask is None:
-            mask = torch.ones((B, T), dtype=torch.bool, device=embed.device)
-
         # Positional embedding
         pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
-        x = embed + self.pos_embedding(pos)  # [B, T, D]
+        value = embed + self.pos_embedding(pos)  # [B, T, D]
 
         # Padding mask: [B, T], True = PAD — so invert `mask`
-        src_key_padding_mask = ~mask
+        src_key_padding_mask = ~mask  # [B, T]
 
         # Causal mask: [T, T], True = masked
         mask = torch.triu(torch.ones(T, T, device=embed.device), diagonal=1).bool()
 
         # Transformer: decoder-only via TransformerEncoder + causal mask
-        x = self.decoder(
-            src=x,
+        value = self.decoder(
+            src=value,
             mask=mask,
             src_key_padding_mask=src_key_padding_mask,
         )  # shape [B, T, D]
 
-        # Output projection to joint token-state logits
-        logit = self.output_linear(x)  # [B, T, V × S]
-        logit = logit.view(B, T, self.vocab_size, self.state_size)
+        # Output projection to token logits
+        logit = self.output_linear(value)  # [B, T, V]
 
-        return logit[:, -1]  # [B, V, S] — final token position
+        return logit
 
     def loss(
         self,
-        logit: torch.Tensor,  # [B, V, S] predicted logit
-        token: torch.Tensor,  # [B] ground truth token index per sequence
-        state: torch.Tensor,  # [B] ground truth state index per sequence
-        weight: torch.Tensor,  # [S] desired state distribution (may be noisy or unnormalized)
+        logit: torch.Tensor,  # [B, L, V] predicted logits for prefix + token
+        token: torch.Tensor,  # [B, T] ground truth token indices
+        state: torch.Tensor,  # [B] ground truth state indices
+        weight: torch.Tensor,  # [S] weight per state (e.g. success=1.0, failure=0.1)
+        index: torch.Tensor,  # [B] index where token sequence begins (first token position)
+        mask: torch.Tensor,  # [B, L] boolean mask for valid positions in logits
     ) -> torch.Tensor:
         """
-        Computes cross-entropy loss against a single (token, state) pair per sequence.
+        Computes cross-entropy loss for next-token prediction, with per-state weighting.
 
         Args:
-            logit: [B, V, S] predicted logit.
-            token: [B] ground truth token index per sequence.
-            state: [B] ground truth state index per sequence.
-            weight: [S] desired state distribution
-        Cross-entropy loss with dynamic importance weighting based on batch empirical distribution
-        and user-specified desired state distribution.
+            logit: [B, L, V] predicted logits for prefix + token.
+                   Each position logit[b, t] predicts token[b, t + 1].
+            token: [B, T] ground truth token indices (shifted right vs logits).
+            state: [B] ground truth state per example.
+            weight: [S] weight per state (e.g. success=1.0, failure=0.1)
+            index: [B] index where token sequence starts in logits (i.e. position of token[0]).
+            mask:  [B, L] boolean mask for valid positions in logits.
 
         Returns:
-            Scalar loss (cross entropy).
+            Scalar loss (cross entropy), averaged over valid tokens and weighted by state.
         """
+        B = logit.size(0)  # batch size
 
-        B, V, S = logit.shape
+        total_loss = 0.0
+        total_weight = 0.0
 
-        # Step 1: Select the logits for the target token — shape [B, S]
-        value = logit[torch.arange(B), token]
+        for i in range(B):
+            # Index[i] is the position of token[0] in the sequence.
+            # The model predicts token[0] from position index[i] - 1
+            start = index[i].item() - 1  # Position in logits that predicts token[0]
 
-        # Step 2: Compute unweighted cross-entropy loss per sample — shape [B]
-        loss = F.cross_entropy(value, state, reduction="none")
+            mask_i = mask[i]  # [L], mask for this sample
 
-        # Step 3: Clamp and normalize desired distribution
-        desired = torch.clamp(weight, min=1e-6)
-        desired = desired / desired.sum()
+            # Count how many valid tokens are predicted starting from start+1 to end of sequence
+            count_i = (
+                (mask_i[start + 1 :]).sum().item()
+            )  # how many predicted tokens to score
 
-        # Step 4: Compute empirical state distribution from batch
-        count = torch.bincount(state, minlength=S).float()
-        empirical = count / count.sum()
+            # Slice predicted logits from model output for this example
+            # These predict token[0] ... token[count_i - 1]
+            logit_i = logit[i, start : start + count_i]  # [count_i, V]
 
-        # Step 5: Importance weight = desired / empirical, normalize to mean 1.0
-        weight = desired / (empirical + 1e-6)
-        weight = weight / weight.mean()
+            # Corresponding ground truth tokens
+            token_target = token[i, :count_i]  # [count_i]
 
-        # Step 6: Gather per-sample weight [B]
-        weight = weight[state]
+            # Get scalar weight for this example based on its state
+            state_weight = weight[state[i]]  # scalar
 
-        # Step 7: Apply weights and reduce
-        return (loss * weight).mean()
+            # Compute cross entropy loss over valid predicted tokens
+            loss_i = F.cross_entropy(logit_i, token_target, reduction="sum")  # scalar
+
+            # Weight loss by state and accumulate
+            total_loss += loss_i * state_weight
+            total_weight += count_i * state_weight
+
+        # Return average loss per valid token, weighted by state
+        return total_loss / total_weight
 
     def collate(self, batch):
         """
@@ -161,68 +179,60 @@ class ReflectiveCore(nn.Module):
 
         Each example in the input batch consists of:
             - prefix: FloatTensor [C, D], real-valued context embedding
-            - token: LongTensor [T], where T > 0
-            - state: LongTensor [], single state label
-
-        This function produces a batch suitable for training a decoder-only model
-        to predict the final token in the sequence (token[T-1]) using the following input:
-            - prefix embedding [C, D]
-            - projected input tokens token[0:T-1], each expanded with one-hot token × state,
-              linearly projected to [D]
-
-        The resulting input embedding has shape [L, D] where L = C + (T-1).
-        A causal attention mask of shape [L, L] is constructed to prevent attending to future positions.
+            - token: LongTensor [T], where T > 1
+            - state: LongTensor [] — categorical state label
 
         Returns:
-            A dict with the following keys:
-                - "mask":  FloatTensor [B, L, L] — causal attention mask (float, with -inf for masked positions)
-                - "embed": FloatTensor [B, L, D] — full input embeddings (prefix + token projections)
-                - "token": LongTensor [B] — final token in each sequence (prediction target)
-                - "state": LongTensor [B] — state label per example (shared across sequence)
+            A dict with:
+                - "mask":  BoolTensor [B, L] — attention mask for valid input embeddings
+                - "embed": FloatTensor [B, L, D] — input embeddings (prefix + tokens)
+                - "token": LongTensor [B, T] — full token sequence
+                - "state": LongTensor [B] — state per example
+                - "index": LongTensor [B] — index where token embeddings begin in logits
         """
         device = next(self.parameters()).device
         D = self.d_model
-        V, S = self.vocab_size, self.state_size
+        V = self.vocab_size
 
-        mask, embed = [], []
-        token_label, state_label = [], []
-        # max_len = 0
+        embed_list, token_list, mask_list, state_list = [], [], [], []
+        index_list = []
 
         for entry in batch:
+            prefix = entry["prefix"].to(device)  # [C, D]
             token = entry["token"].to(device)  # [T]
             state = entry["state"].to(device)  # []
-            prefix = entry["prefix"].to(device)  # [C, D]
 
             T = token.size(0)
-            assert T > 0, "Sequence must have at least 1 token (to predict one step)"
+            assert T > 0, "Token sequence must have at least 1 token"
 
-            token_label.append(token[-1])  # []
-            state_label.append(state)  # []
+            value = F.one_hot(token, num_classes=V).float()  # [T, V]
+            value = self.input_linear(value)  # [T, D]
+            value = torch.cat([prefix, value], dim=0)  # [C + T, D]
 
-            # One-hot encode token and state
-            x = F.one_hot(token[:-1], num_classes=V).float()  # [T-1, V]
+            embed_list.append(value)
+            token_list.append(
+                token
+            )  # target tokens: predict token[t+1] from prefix + token[:t]
+            mask_list.append(
+                torch.ones(value.shape[0], dtype=torch.bool, device=device)
+            )
+            state_list.append(state)
+            index_list.append(torch.tensor(prefix.shape[0], device=device))  # scalar
 
-            x = self.input_linear(x)  # [T-1, D]
-            x = torch.cat([prefix, x], dim=0)  # [C+T-1, D]
-            embed.append(x)
-
-        # Length of embed
-        count = torch.tensor([e.size(0) for e in embed], device=device)
-
-        # Pad to longest sequence with zeros
         embed = torch.nn.utils.rnn.pad_sequence(
-            embed, batch_first=True
-        )  # [B, T, D] <= max(T)
-
-        # True for valid, False for padding
-        B, T = embed.size(0), embed.size(1)
-        mask = torch.arange(T, device=device).expand(B, T) < count.unsqueeze(
-            1
-        )  # shape: [B, T]
+            embed_list, batch_first=True
+        )  # [B, L, D]
+        token = torch.nn.utils.rnn.pad_sequence(
+            token_list, batch_first=True, padding_value=0
+        )  # [B, T]
+        mask = torch.nn.utils.rnn.pad_sequence(mask_list, batch_first=True)  # [B, L]
+        state = torch.stack(state_list)  # [B]
+        index = torch.stack(index_list)  # [B]
 
         return {
-            "mask": mask,  # [B, T]
-            "embed": embed,  # [B, T, D]
-            "token": torch.stack(token_label),  # [B]
-            "state": torch.stack(state_label),  # [B]
+            "mask": mask,  # [B, L] — attention mask for valid input embeddings
+            "embed": embed,  # [B, L, D]
+            "token": token,  # [B, T] — full token sequence, including token[0]
+            "state": state,  # [B]
+            "index": index,  # [B] — where token logits begin in output
         }

@@ -16,7 +16,6 @@ def make_dummy_model():
     )
     return ReflectiveCore(
         vocab_size=5,
-        state_size=2,
         max_seq_len=10,
         max_prefix_len=4,
         decoder=decoder,
@@ -26,13 +25,11 @@ def make_dummy_model():
 def test_sequence():
     model = make_dummy_model()
     prefix = torch.randn(4, 16)  # [C, d_model]
-    weight = torch.tensor([0.7, 0.3])  # [S]
     maximum = 10
 
     tokens = sequence(
         model=model,
         prefix=prefix,
-        weight=weight,
         maximum=maximum,
         device="cpu",
     )
