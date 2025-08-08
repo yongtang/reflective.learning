@@ -241,7 +241,7 @@ def f_callback(
             {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
         )
 
-        progress._meta_save_ += save_interval
+        progress._meta_index_ += interval
 
     return
 
