@@ -215,116 +215,13 @@ def f_inference(
 
 def f_callback(
     info,
-    data,
-    image,
-    stub_total,
-    stub_batch,
-    stub_interval,
-    save_interval,
-    database,
-    encoder,
+    interval,
     model,
-    progress,
-    device,
 ):
-    if not hasattr(progress, "_meta_stub_"):
-        progress._meta_stub_ = 0
-    if not hasattr(progress, "_meta_save_"):
-        progress._meta_save_ = 0
+    if not hasattr(progress, "_meta_index_"):
+        progress._meta_index_ = 0
 
-    if progress.n > progress._meta_stub_ + stub_interval:
-
-        # env_size, max_steps
-        env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
-
-        weight = torch.tensor(f_weight(info), device=device)
-
-        entries = []
-        for i in range(stub_batch):
-
-            # goal, start, facing
-            while True:
-                goal = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-                start = random.randint(1, env_size - 2), random.randint(1, env_size - 2)
-                if goal != start:
-                    break
-            facing = facing_space[random.randint(0, len(facing_space) - 1)]
-
-            entry_text = f_text(
-                env_size=env_size,
-                max_steps=max_steps,
-                goal=goal,
-                start=start,
-                facing=facing,
-            )
-            entry_image = f_image(
-                env_size=env_size,
-                max_steps=max_steps,
-                goal=goal,
-                start=start,
-                facing=facing,
-                image=image,
-            )
-            prefix = f_prefix(
-                entry_text=entry_text,
-                entry_image=entry_image,
-                encoder=encoder,
-                database=database,
-                image=image,
-            )
-
-            action = f_inference(
-                model=model,
-                vocab=vocab,
-                maximum=max_steps,
-                prefix=prefix,
-                device=device,
-            )
-
-            state = f_step(
-                step=f_replay(
-                    env_size=env_size,
-                    max_steps=max_steps,
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    action=action,
-                ),
-                max_steps=max_steps,
-            )
-
-            entry = {
-                "text": entry_text,
-                "image": entrie_image,
-                "token": action,
-                "state": state,
-            }
-
-            with open(os.path.join(data, "stub.data"), "a") as f:
-                f.write(json.dumps(entry, sort_keys=True) + "\n")
-
-            for data_index in range(len(entry["token"])):
-                selection = random.randint(0, stub_total - 1)
-                data_entry = json.dumps(
-                    {
-                        "text": entry["text"],
-                        "image": entry["image"],
-                        "token": entry["token"][: data_index + 1],
-                        "state": entry["state"],
-                    },
-                    sort_keys=True,
-                )
-                with database.begin(write=True) as transaction:
-                    transaction.put(
-                        f"stub_{selection:08d}".encode(), data_entry.encode()
-                    )
-
-        progress._meta_stub_ += stub_interval
-
-    if (
-        progress.n > progress._meta_save_ + save_interval
-        or progress.n == progress.total
-    ):
+    if progress.n > progress._meta_index_ + interval or progress.n == progress.total:
         # keep copy of max_version = 3
         max_version = 3
         for i in reversed(range(1, max_version)):
@@ -433,22 +330,22 @@ def f_line(vocab_fn, state_fn, max_steps, image, encoder, database, line):
     }
 
 
-class IterableDataset(torch.utils.data.IterableDataset):
-    def __init__(self, database, seed_total, stub_total, line_fn):
+class PretrainDataset(torch.utils.data.IterableDataset):
+    def __init__(self, database, essential, reservoir, line_fn):
         super().__init__()
         self.database = database
-        self.seed_total = seed_total
-        self.stub_total = stub_total
+        self.essential = essential
+        self.reservoir = reservoir
         self.line_fn = line_fn
 
     def __iter__(self):
         while True:
             if random.random() < 0.5:
-                selection = random.randint(0, self.seed_total - 1)
+                selection = random.randint(0, self.essential - 1)
                 selection = f"seed_{selection:08d}".encode()
             else:
-                selection = random.randint(0, self.stub_total - 1)
-                selection = f"stub_{selection:08d}".encode()
+                selection = random.randint(0, self.reservoir - 1)
+                selection = f"more_{selection:08d}".encode()
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
             if selection:
@@ -653,6 +550,8 @@ def run_spin(seed, data, image, max_steps):
                             )
                             + "\n"
                         )
+    with open(os.path.join(data, "data.data"), "w") as f:
+        pass
 
     torch.save(
         {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
@@ -661,15 +560,13 @@ def run_spin(seed, data, image, max_steps):
     print(f"Save model: {os.path.join(data, 'model.pt')}")
 
 
-def run_pretrain(
+def run_learn(
     data,
     image,
     total,
     batch,
     reservoir,
-    stub_batch,
-    stub_interval,
-    save_interval,
+    interval,
     lr,
     device,
 ):
@@ -694,8 +591,21 @@ def run_pretrain(
     # 4GB = 1<<32
     database = lmdb.open(data, map_size=1 << 32, readonly=False, create=True)
 
-    seed_total, stub_total = 0, 0
     with database.begin(write=True) as transaction:
+        with tqdm(
+            total=transaction.stats["entries"],
+            desc="Lmdb check",
+            unit="key",
+            dynamic_ncols=True,
+        ) as progress:
+            for key, _ in transaction.cursor():
+                progress.update(1)
+                if key.startswith(f"seed_".encode()) or key.startswith(
+                    f"data_".encode()
+                ):
+                    transaction.delete(key)
+
+        count = 0
         with open(os.path.join(data, "seed.data"), "r") as f:
             with tqdm(
                 total=os.path.getsize(os.path.join(data, "seed.data")),
@@ -710,26 +620,15 @@ def run_pretrain(
                         entry = json.loads(line)
                         data_entry = json.dumps(entry, sort_keys=True)
                         transaction.put(
-                            f"seed_{seed_total:08d}".encode(), data_entry.encode()
+                            f"seed_{essential:08d}".encode(), data_entry.encode()
                         )
-                        seed_total += 1
+                        count += 1
+        essential = count
 
-        with open(os.path.join(data, "stub.data"), "w") as f:
-            with tqdm(
-                total=reservoir,
-                desc="Stub index",
-                unit="sub",
-                dynamic_ncols=True,
-            ) as progress:
-                for stub_index in range(reservoir):
-                    progress.update(1)
-                    transaction.delete(f"stub_{stub_total:08d}".encode())
-                    stub_total += 1
-
-    dataset = IterableDataset(
+    dataset = PretrainDataset(
         database,
-        seed_total,
-        stub_total,
+        essential,
+        reservoir,
         line_fn=functools.partial(
             f_line,
             vocab_fn=lambda e: info["vocab"][e],
@@ -757,14 +656,7 @@ def run_pretrain(
         callback=functools.partial(
             f_callback,
             info=info,
-            data=data,
-            image=image,
-            stub_total=stub_total,
-            stub_batch=stub_batch,
-            stub_interval=stub_interval,
-            save_interval=save_interval,
-            database=database,
-            encoder=encoder,
+            interval=interval,
         ),
         device=device,
     )
@@ -855,18 +747,16 @@ def main():
     spin_parser.add_argument("--image", required=True)
     spin_parser.add_argument("--max-steps", type=int, required=True)
 
-    # ---- pretrain mode ----
-    pretrain_parser = subparsers.add_parser("pretrain", help="Pretrain mode")
-    pretrain_parser.add_argument("--data", required=True)
-    pretrain_parser.add_argument("--image", required=True)
-    pretrain_parser.add_argument("--total", type=int, required=True)
-    pretrain_parser.add_argument("--batch", type=int, required=True)
-    pretrain_parser.add_argument("--reservoir", type=int, required=True)
-    pretrain_parser.add_argument("--stub-batch", type=int, required=True)
-    pretrain_parser.add_argument("--stub-interval", type=int, required=True)
-    pretrain_parser.add_argument("--save-interval", type=int, required=True)
-    pretrain_parser.add_argument("--lr", type=float, required=True)
-    pretrain_parser.add_argument("--device")
+    # ---- learn mode ----
+    learn_parser = subparsers.add_parser("learn", help="Pretrain mode")
+    learn_parser.add_argument("--data", required=True)
+    learn_parser.add_argument("--image", required=True)
+    learn_parser.add_argument("--total", type=int, required=True)
+    learn_parser.add_argument("--batch", type=int, required=True)
+    learn_parser.add_argument("--reservoir", type=int, required=True)
+    learn_parser.add_argument("--interval", type=int, required=True)
+    learn_parser.add_argument("--lr", type=float, required=True)
+    learn_parser.add_argument("--device")
 
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Perform mode")
@@ -895,16 +785,14 @@ def main():
             max_steps=args.max_steps,
         )
 
-    elif args.mode == "pretrain":
-        run_pretrain(
+    elif args.mode == "learn":
+        run_learn(
             data=args.data,
             image=args.image,
             total=args.total,
             batch=args.batch,
             reservoir=args.reservoir,
-            stub_batch=args.stub_batch,
-            stub_interval=args.stub_interval,
-            save_interval=args.save_interval,
+            interval=args.interval,
             lr=args.lr,
             device=args.device,
         )
