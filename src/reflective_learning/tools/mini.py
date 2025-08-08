@@ -620,7 +620,7 @@ def run_learn(
                         entry = json.loads(line)
                         data_entry = json.dumps(entry, sort_keys=True)
                         transaction.put(
-                            f"seed_{essential:08d}".encode(), data_entry.encode()
+                            f"seed_{count:08d}".encode(), data_entry.encode()
                         )
                         count += 1
         essential = count
