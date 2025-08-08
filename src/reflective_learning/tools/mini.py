@@ -215,6 +215,7 @@ def f_inference(
 
 def f_callback(
     info,
+    data,
     interval,
     model,
     progress,
@@ -658,6 +659,7 @@ def run_learn(
         callback=functools.partial(
             f_callback,
             info=info,
+            data=data,
             interval=interval,
         ),
         device=device,
