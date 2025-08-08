@@ -217,6 +217,8 @@ def f_callback(
     info,
     interval,
     model,
+    progress,
+    device,
 ):
     if not hasattr(progress, "_meta_index_"):
         progress._meta_index_ = 0
