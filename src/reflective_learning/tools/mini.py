@@ -593,7 +593,7 @@ def run_learn(
 
     with database.begin(write=True) as transaction:
         with tqdm(
-            total=transaction.stat["entries"],
+            total=transaction.stat()["entries"],
             desc="Lmdb check",
             unit="key",
             dynamic_ncols=True,
