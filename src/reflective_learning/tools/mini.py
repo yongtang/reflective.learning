@@ -213,6 +213,55 @@ def f_inference(
     return action
 
 
+def f_sequence(
+    goal,
+    start,
+    facing,
+    image,
+    env_size,
+    max_steps,
+    vocab,
+    weight,
+    encoder,
+    model,
+    device,
+):
+
+    entry_text = f_text(
+        env_size=env_size,
+        max_steps=max_steps,
+        goal=goal,
+        start=start,
+        facing=facing,
+    )
+    entry_image = f_image(
+        env_size=env_size,
+        max_steps=max_steps,
+        goal=goal,
+        start=start,
+        facing=facing,
+        image=image,
+    )
+    prefix = f_prefix(
+        entry_text=entry_text,
+        entry_image=entry_image,
+        encoder=encoder,
+        database=None,
+        image=image,
+    )
+
+    action = f_inference(
+        model=model,
+        vocab=vocab,
+        maximum=max_steps,
+        prefix=prefix,
+        device=device,
+    )
+
+    step = f_replay(env_size, max_steps, goal, start, facing, action)
+    state = f_step(step=step, max_steps=max_steps)
+
+
 def f_callback(
     info,
     data,
@@ -754,38 +803,19 @@ def run_play(goal, start, facing, model, device):
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
     with tempfile.TemporaryDirectory() as image:
-        entry_text = f_text(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-        )
-        entry_image = f_image(
-            env_size=env_size,
-            max_steps=max_steps,
+        entry = f_sequence(
             goal=goal,
             start=start,
             facing=facing,
             image=image,
-        )
-        prefix = f_prefix(
-            entry_text=entry_text,
-            entry_image=entry_image,
-            encoder=encoder,
-            database=None,
-            image=image,
-        )
-
-        action = f_inference(
-            model=model,
+            env_size=env_size,
+            max_steps=max_steps,
             vocab=vocab,
-            maximum=max_steps,
-            prefix=prefix,
+            weight=weight,
+            encoder=encoder,
+            model=model,
             device=device,
         )
-    step = f_replay(env_size, max_steps, goal, start, facing, action)
-    state = f_step(step=step, max_steps=max_steps)
 
     print(f"Play model: ({state}) {action}")
 
