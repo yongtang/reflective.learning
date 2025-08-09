@@ -814,7 +814,7 @@ def run_explore(data, image, total, batch, lr, device):
 
     with tqdm(
         total=total,
-        desc="Stub",
+        desc="Stub data",
         dynamic_ncols=True,
         unit="stub",
         bar_format=bar_format,
@@ -852,6 +852,21 @@ def run_explore(data, image, total, batch, lr, device):
                         device=device,
                     )
                     f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+                    progress.update(1)
+
+    with tqdm(
+        total=total,
+        desc="Stub lmdb",
+        dynamic_ncols=True,
+        unit="stub",
+        bar_format=bar_format,
+    ) as progress:
+        for start in range(0, total, batch):
+            final = min(start + batch, total)
+            with open(os.path.join(data, "stub.data"), "r") as f:
+                for i in range(start, final):
+                    entry = json.loads(file.readline())
 
                     progress.update(1)
 
