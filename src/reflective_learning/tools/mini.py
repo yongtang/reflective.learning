@@ -610,9 +610,9 @@ def run_learn(
         ) as progress:
             for key, _ in transaction.cursor():
                 progress.update(1)
-                if key.startswith(f"seed_".encode()) or key.startswith(
-                    f"data_".encode()
-                ):
+                if key.startswith(f"seed_".encode()):
+                    transaction.delete(key)
+                if key.startswith(f"data_".encode()):
                     transaction.delete(key)
 
         count = 0
