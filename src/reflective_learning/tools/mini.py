@@ -842,6 +842,18 @@ def run_explore(data, image, total, lr, device):
     # 4GB = 1<<32
     database = lmdb.open(data, map_size=1 << 32, readonly=False, create=True)
 
+    with database.begin(write=True) as transaction:
+        with tqdm(
+            total=transaction.stat()["entries"],
+            desc="Lmdb check",
+            unit="key",
+            dynamic_ncols=True,
+        ) as progress:
+            for key, _ in transaction.cursor():
+                progress.update(1)
+                if key.startswith(f"stub_".encode()):
+                    transaction.delete(key)
+
     total_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
