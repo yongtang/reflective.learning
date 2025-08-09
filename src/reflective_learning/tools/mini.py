@@ -886,6 +886,10 @@ def run_explore(data, image, total, lr, device):
                     model=model,
                     device=device,
                 )
+                token = torch.tensor(
+                    [vocab_fn(e) for e in entry["token"]],
+                    dtype=torch.long,
+                )
                 prefix = f_prefix(
                     entry_text=entry["text"],
                     entry_image=entry["image"],
@@ -900,7 +904,7 @@ def run_explore(data, image, total, lr, device):
                     "state": entry["state"],
                     "novelty": f_novelty(
                         model=model_base,
-                        token=entry["token"],
+                        token=token,
                         prefix=prefix,
                         device=device,
                     ),
