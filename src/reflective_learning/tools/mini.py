@@ -805,54 +805,55 @@ def run_explore(data, image, total, batch, lr, device):
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
-    total = batch
-
     total_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
         f"{{n:{total_width}d}}/{{total:{total_width}d}} "
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
-    with open(os.path.join(data, "stub.data"), "w") as f:
-        with tqdm(
-            total=total,
-            desc="Stub",
-            dynamic_ncols=True,
-            unit="seed",
-            bar_format=bar_format,
-        ) as progress:
-            for i, model in zip(
-                range(batch), itertools.cycle((model_base, model_tune))
-            ):
-                while True:
-                    goal = (
-                        random.randint(1, env_size - 2),
-                        random.randint(1, env_size - 2),
-                    )
-                    start = (
-                        random.randint(1, env_size - 2),
-                        random.randint(1, env_size - 2),
-                    )
-                    if goal != start:
-                        break
-                facing = random.choice(facing_space)
 
-                entry = f_sequence(
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    image=image,
-                    env_size=env_size,
-                    max_steps=max_steps,
-                    vocab=vocab,
-                    weight=weight,
-                    encoder=encoder,
-                    model=model,
-                    device=device,
-                )
-                f.write(json.dumps(entry, sort_keys=True) + "\n")
+    with tqdm(
+        total=total,
+        desc="Stub",
+        dynamic_ncols=True,
+        unit="stub",
+        bar_format=bar_format,
+    ) as progress:
+        for start in range(0, total, batch):
+            final = min(start + batch, total)
+            with open(os.path.join(data, "stub.data"), "w") as f:
+                for i, model in zip(
+                    range(start), itertools.cycle((model_base, model_tune))
+                ):
+                    while True:
+                        goal = (
+                            random.randint(1, env_size - 2),
+                            random.randint(1, env_size - 2),
+                        )
+                        start = (
+                            random.randint(1, env_size - 2),
+                            random.randint(1, env_size - 2),
+                        )
+                        if goal != start:
+                            break
+                    facing = random.choice(facing_space)
 
-                progress.update(1)
+                    entry = f_sequence(
+                        goal=goal,
+                        start=start,
+                        facing=facing,
+                        image=image,
+                        env_size=env_size,
+                        max_steps=max_steps,
+                        vocab=vocab,
+                        weight=weight,
+                        encoder=encoder,
+                        model=model,
+                        device=device,
+                    )
+                    f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+                    progress.update(1)
 
     return
 
