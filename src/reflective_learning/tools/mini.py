@@ -428,9 +428,7 @@ def f_prefix(entry_text, entry_image, encoder, database, image):
 
 
 @functools.lru_cache(maxsize=4096)
-def f_line(vocab_fn, state_fn, max_steps, image, encoder, database, line):
-    entry = json.loads(line)
-
+def f_datum(vocab_fn, state_fn, max_steps, image, encoder, database, entry):
     assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
 
     token = torch.tensor(
@@ -458,12 +456,12 @@ def f_line(vocab_fn, state_fn, max_steps, image, encoder, database, line):
 
 
 class PretrainDataset(torch.utils.data.IterableDataset):
-    def __init__(self, database, essential, reservoir, line_fn):
+    def __init__(self, database, essential, reservoir, datum_fn):
         super().__init__()
         self.database = database
         self.essential = essential
         self.reservoir = reservoir
-        self.line_fn = line_fn
+        self.datum_fn = datum_fn
 
     def __iter__(self):
         while True:
@@ -476,7 +474,7 @@ class PretrainDataset(torch.utils.data.IterableDataset):
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
             if selection:
-                yield self.line_fn(line=selection)
+                yield self.datum_fn(datum=json.loads(selection))
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
@@ -781,7 +779,7 @@ def run_learn(
         essential,
         reservoir,
         line_fn=functools.partial(
-            f_line,
+            f_datum,
             vocab_fn=lambda e: info["vocab"][e],
             state_fn=lambda e: info["state"][e],
             max_steps=info["max"],

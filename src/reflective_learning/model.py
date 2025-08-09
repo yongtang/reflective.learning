@@ -173,6 +173,50 @@ class ReflectiveCore(nn.Module):
         # Return average loss per valid token, weighted by state
         return total_loss / total_weight
 
+    def prob(self, embed, mask, token, index):
+        """
+        Compute sequence log-probabilities log P(y | x) in batch, leveraging collate() outputs.
+
+        Args:
+            embed: [B, L, D] from collate()
+            mask:  [B, L]    from collate()
+            token: [B, T]    from collate() (right-padded)
+            index: [B]       from collate() (position of token[0] in input)
+
+        Returns:
+            logprob:  [B] total log-probability of each sequence
+        """
+        # Run the transformer to get logits at every position
+        logit = self.call(mask=mask, embed=embed)  # [B,L,V]
+        B, L, V = logit.shape
+        T = token.size(1)
+
+        # Compute, for each token in the sequence, which logit position predicts it
+        I = torch.arange(T, device=mask.device).view(1, T)  # offsets [0, 1, 2, ...]
+        start = (index - 1).view(B, 1)  # position before the first token
+        position = start + I  # [B,T] positions in logits
+
+        # Mark which positions are valid (inside sequence length and not padding)
+        valid = (
+            (position >= 0)
+            & ((position + 1) < L)
+            & mask.gather(1, (position + 1).clamp_(0, L - 1))
+        )
+        position = position.clamp(0, L - 1)  # keep indices in range for gather
+
+        # Get logits for each reference token's prediction step and turn into log-prob
+        step = logit.gather(1, position.unsqueeze(-1).expand(B, T, V))  # [B,T,V]
+        logp = F.log_softmax(step, dim=-1)  # [B,T,V]
+
+        # Keep only the log-prob assigned to each reference token
+        logp = logp.gather(-1, token.unsqueeze(-1)).squeeze(-1)  # [B,T]
+
+        # Zero out positions that are not valid
+        logp = logp * valid.float()
+
+        # Sum the token log-probs to get total sequence log-prob
+        return logp.sum(dim=1)  # [B]
+
     def collate(self, batch):
         """
         Collate function for training the ReflectiveCore model using next-token prediction.
