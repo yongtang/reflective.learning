@@ -823,7 +823,7 @@ def run_explore(data, image, total, batch, lr, device):
             final = min(start + batch, total)
             with open(os.path.join(data, "stub.data"), "w") as f:
                 for i, model in zip(
-                    range(start), itertools.cycle((model_base, model_tune))
+                    range(start, final), itertools.cycle((model_base, model_tune))
                 ):
                     while True:
                         goal = (
