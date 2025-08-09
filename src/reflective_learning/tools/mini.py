@@ -213,6 +213,40 @@ def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
     }
 
 
+def f_novelty(model, token, prefix, device):
+    model.eval()
+
+    model = model.to(device)
+    token = token.to(device)
+    prefix = prefix.to(device)
+
+    with torch.no_grad():
+        V = model.vocab_size
+        C = prefix.size(0)
+
+        # Project tokens and prepend prefix
+        embed = torch.nn.functional.one_hot(token, num_classes=V).float()  # [T, V]
+        embed = model.input_linear(embed)  # [T, D]
+        embed = torch.cat([prefix, embed], dim=0)  # [C+T, D]
+        embed = embed.unsqueeze(0)  # [1, C+T, D]
+
+        # Full attention mask (no padding here)
+        mask = torch.ones(1, C + token.size(0), dtype=torch.bool, device=device)
+
+        # Run transformer
+        logit = model.call(mask=mask, embed=embed)[0]  # [C+T, V]
+
+        # Slice positions that predict each token
+        logit = logit[C - 1 : C - 1 + token.size(0)]  # [T, V]
+
+        # Per-step log-prob for the actual token
+        logp = F.log_softmax(logit, dim=-1)  # [T, V]
+        logp = logp.gather(-1, token.view(-1, 1)).squeeze(-1)  # [T]
+
+        # -sum log-probs
+        return -logp.sum()
+
+
 def f_inference(
     model,
     vocab,
@@ -852,33 +886,31 @@ def run_explore(data, image, total, lr, device):
                     model=model,
                     device=device,
                 )
-                f.write(json.dumps(entry, sort_keys=True) + "\n")
-
-                progress.update(1)
-
-    with open(os.path.join(data, "stub.data"), "r") as f:
-        with tqdm(
-            total=total,
-            desc="Stub lmdb",
-            dynamic_ncols=True,
-            unit="stub",
-            bar_format=bar_format,
-        ) as progress:
-            for i in range(total):
-                entry = json.loads(f.readline())
-
+                prefix = f_prefix(
+                    entry_text=entry["text"],
+                    entry_image=entry["image"],
+                    encoder=encoder,
+                    database=database,
+                    image=image,
+                )
                 entry = {
                     "text": entry["text"],
                     "image": entry["image"],
                     "token": entry["token"],
                     "state": entry["state"],
+                    "novelty": f_novelty(
+                        model=model_base,
+                        token=entry["token"],
+                        prefix=prefix,
+                        device=device,
+                    ),
                 }
+                f.write(json.dumps(entry, sort_keys=True) + "\n")
                 with database.begin() as transaction:
                     transaction.put(
                         f"stub_{i:08d}".encode(),
                         json.dumps(entry, sort_keys=True).encode(),
                     )
-
                 progress.update(1)
 
     return
