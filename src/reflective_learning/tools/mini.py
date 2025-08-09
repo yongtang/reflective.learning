@@ -706,6 +706,32 @@ def run_learn(
     )
 
 
+def run_explore(data, image, total, batch, lr, device):
+
+    info, weight = operator.itemgetter("info", "weight")(
+        torch.load(os.path.join(data, "model.pt"), map_location="cpu")
+    )
+    print(f"Load info: {json.dumps(info, sort_keys=True)}")
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    model_base = f_model(info).to(device)
+    model_base.load_state_dict(weight)
+    model_base.to(device)
+
+    model_tune = f_model(info).to(device)
+    model_tune.load_state_dict(weight)
+    model_tune.to(device)
+
+    print(f"Load model: {os.path.join(data, 'model.pt')}")
+
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+
+    weight = torch.tensor(f_weight(info), device=device)
+
+    return
+
+
 def run_play(goal, start, facing, model, device):
 
     info, weight = operator.itemgetter("info", "weight")(
