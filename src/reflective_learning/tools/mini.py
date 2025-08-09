@@ -635,6 +635,25 @@ def run_learn(
                         count += 1
         essential = count
 
+        count = 0
+        with open(os.path.join(data, "data.data"), "r") as f:
+            with tqdm(
+                total=os.path.getsize(os.path.join(data, "data.data")),
+                desc="Data index",
+                unit="B",
+                unit_scale=True,
+                dynamic_ncols=True,
+            ) as progress:
+                for line in f:
+                    progress.update(len(line.encode("utf-8")))
+                    if line.strip():
+                        entry = json.loads(line)
+                        data_entry = json.dumps(entry, sort_keys=True)
+                        transaction.put(
+                            f"data_{count:08d}".encode(), data_entry.encode()
+                        )
+                        count = (count + 1) % reservoir
+
     dataset = PretrainDataset(
         database,
         essential,
