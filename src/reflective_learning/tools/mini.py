@@ -887,7 +887,7 @@ def run_explore(data, image, total, lr, device):
                     device=device,
                 )
                 token = torch.tensor(
-                    [vocab_fn(e) for e in entry["token"]],
+                    [vocab[e] for e in entry["token"]],
                     dtype=torch.long,
                 )
                 prefix = f_prefix(
