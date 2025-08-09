@@ -614,6 +614,8 @@ def run_learn(
                     transaction.delete(key)
                 if key.startswith(f"data_".encode()):
                     transaction.delete(key)
+                if key.startswith(f"info_".encode()):
+                    transaction.delete(key)
 
         count = 0
         with open(os.path.join(data, "seed.data"), "r") as f:
@@ -629,10 +631,11 @@ def run_learn(
                     if line.strip():
                         entry = json.loads(line)
                         data_entry = json.dumps(entry, sort_keys=True)
+                        index = count
                         transaction.put(
-                            f"seed_{count:08d}".encode(), data_entry.encode()
+                            f"seed_{index:08d}".encode(), data_entry.encode()
                         )
-                        count += 1
+                        count = count + 1
         essential = count
 
         count = 0
@@ -649,10 +652,21 @@ def run_learn(
                     if line.strip():
                         entry = json.loads(line)
                         data_entry = json.dumps(entry, sort_keys=True)
+                        index = count % reservoir
                         transaction.put(
                             f"data_{count:08d}".encode(), data_entry.encode()
                         )
                         count = (count + 1) % reservoir
+        transaction.put(
+            f"info_meta".encode(),
+            json.dumps(
+                {
+                    "essential": essential,
+                    "reservoir": reservoir,
+                },
+                sort_keys=True,
+            ).encode(),
+        )
 
     dataset = PretrainDataset(
         database,
@@ -778,7 +792,7 @@ def main():
     spin_parser.add_argument("--max-steps", type=int, required=True)
 
     # ---- learn mode ----
-    learn_parser = subparsers.add_parser("learn", help="Pretrain mode")
+    learn_parser = subparsers.add_parser("learn", help="Learn mode")
     learn_parser.add_argument("--data", required=True)
     learn_parser.add_argument("--image", required=True)
     learn_parser.add_argument("--total", type=int, required=True)
@@ -787,6 +801,15 @@ def main():
     learn_parser.add_argument("--interval", type=int, required=True)
     learn_parser.add_argument("--lr", type=float, required=True)
     learn_parser.add_argument("--device")
+
+    # ---- explore mode ----
+    explore_parser = subparsers.add_parser("explore", help="Explore mode")
+    explore_parser.add_argument("--data", required=True)
+    explore_parser.add_argument("--image", required=True)
+    explore_parser.add_argument("--total", type=int, required=True)
+    explore_parser.add_argument("--batch", type=int, required=True)
+    explore_parser.add_argument("--lr", type=float, required=True)
+    explore_parser.add_argument("--device")
 
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Perform mode")
@@ -823,6 +846,16 @@ def main():
             batch=args.batch,
             reservoir=args.reservoir,
             interval=args.interval,
+            lr=args.lr,
+            device=args.device,
+        )
+
+    elif args.mode == "explore":
+        run_explore(
+            data=args.data,
+            image=args.image,
+            total=args.total,
+            batch=args.batch,
             lr=args.lr,
             device=args.device,
         )
