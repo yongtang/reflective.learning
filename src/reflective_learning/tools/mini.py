@@ -805,6 +805,9 @@ def run_explore(data, image, total, batch, lr, device):
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
+    total = batch
+
+    total_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
         f"{{n:{total_width}d}}/{{total:{total_width}d}} "
@@ -812,7 +815,7 @@ def run_explore(data, image, total, batch, lr, device):
     )
     with open(os.path.join(data, "stub.data"), "w") as f:
         with tqdm(
-            total=batch,
+            total=total,
             desc="Stub",
             dynamic_ncols=True,
             unit="seed",
