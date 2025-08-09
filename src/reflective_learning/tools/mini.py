@@ -869,9 +869,9 @@ def run_explore(data, image, total, lr, device):
             unit="stub",
             bar_format=bar_format,
         ) as progress:
-            for i, model in zip(
-                range(total), itertools.cycle((model_base, model_tune))
-            ):
+            for batch_start in range(0, total, batch):
+                batch_final = min(batch_start + batch, total)
+                batch_count = batch_final - batch_start
                 while True:
                     goal = (
                         random.randint(1, env_size - 2),
@@ -884,51 +884,53 @@ def run_explore(data, image, total, lr, device):
                     if goal != start:
                         break
                 facing = random.choice(facing_space)
-
-                entry = f_sequence(
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    image=image,
-                    env_size=env_size,
-                    max_steps=max_steps,
-                    vocab=vocab,
-                    weight=weight,
-                    encoder=encoder,
-                    model=model,
-                    device=device,
-                )
-                token = torch.tensor(
-                    [vocab[e] for e in entry["token"]],
-                    dtype=torch.long,
-                )
-                prefix = f_prefix(
-                    entry_text=entry["text"],
-                    entry_image=entry["image"],
-                    encoder=encoder,
-                    database=database,
-                    image=image,
-                )
-                novelty = f_novelty(
-                    model=model_base,
-                    token=token,
-                    prefix=prefix,
-                    device=device,
-                ).item()
-                entry = {
-                    "text": entry["text"],
-                    "image": entry["image"],
-                    "token": entry["token"],
-                    "state": entry["state"],
-                    "novelty": novelty,
-                }
-                f.write(json.dumps(entry, sort_keys=True) + "\n")
-                with database.begin(write=True) as transaction:
-                    transaction.put(
-                        f"stub_{i:08d}".encode(),
-                        json.dumps(entry, sort_keys=True).encode(),
+                for batch_index, model in zip(
+                    range(batch_count), itertools.cycle((model_base, model_tune))
+                ):
+                    entry = f_sequence(
+                        goal=goal,
+                        start=start,
+                        facing=facing,
+                        image=image,
+                        env_size=env_size,
+                        max_steps=max_steps,
+                        vocab=vocab,
+                        weight=weight,
+                        encoder=encoder,
+                        model=model,
+                        device=device,
                     )
-                progress.update(1)
+                    token = torch.tensor(
+                        [vocab[e] for e in entry["token"]],
+                        dtype=torch.long,
+                    )
+                    prefix = f_prefix(
+                        entry_text=entry["text"],
+                        entry_image=entry["image"],
+                        encoder=encoder,
+                        database=database,
+                        image=image,
+                    )
+                    novelty = f_novelty(
+                        model=model_base,
+                        token=token,
+                        prefix=prefix,
+                        device=device,
+                    ).item()
+                    entry = {
+                        "text": entry["text"],
+                        "image": entry["image"],
+                        "token": entry["token"],
+                        "state": entry["state"],
+                        "novelty": novelty,
+                    }
+                    f.write(json.dumps(entry, sort_keys=True) + "\n")
+                    with database.begin(write=True) as transaction:
+                        transaction.put(
+                            f"stub_{batch_index:08d}".encode(),
+                            json.dumps(entry, sort_keys=True).encode(),
+                        )
+                progress.update(batch_count)
 
     return
 
