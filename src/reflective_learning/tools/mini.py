@@ -897,17 +897,18 @@ def run_explore(data, image, total, lr, device):
                     database=database,
                     image=image,
                 )
+                novelty = f_novelty(
+                    model=model_base,
+                    token=token,
+                    prefix=prefix,
+                    device=device,
+                ).item()
                 entry = {
                     "text": entry["text"],
                     "image": entry["image"],
                     "token": entry["token"],
                     "state": entry["state"],
-                    "novelty": f_novelty(
-                        model=model_base,
-                        token=token,
-                        prefix=prefix,
-                        device=device,
-                    ),
+                    "novelty": novelty,
                 }
                 f.write(json.dumps(entry, sort_keys=True) + "\n")
                 with database.begin() as transaction:
