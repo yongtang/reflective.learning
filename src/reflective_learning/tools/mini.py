@@ -224,24 +224,31 @@ def f_callback(
     if not hasattr(progress, "_meta_index_"):
         progress._meta_index_ = 0
 
-    if progress.n > progress._meta_index_ + interval or progress.n == progress.total:
-        # keep copy of max_version = 3
-        max_version = 3
-        for i in reversed(range(1, max_version)):
-            src = os.path.join(data, f"model_{i}.pt")
-            dst = os.path.join(data, f"model_{i+1}.pt")
-            if os.path.exists(src):
-                shutil.move(src, dst)
+    if not (
+        progress.n > progress._meta_index_ + interval or progress.n == progress.total
+    ):
+        return
 
-        # model.pt => model_1.pt
-        shutil.move(os.path.join(data, "model.pt"), os.path.join(data, "model_1.pt"))
+    # keep copy of max_version = 3
+    max_version = 3
+    for i in reversed(range(1, max_version)):
+        src = os.path.join(data, f"model_{i}.pt")
+        dst = os.path.join(data, f"model_{i+1}.pt")
+        if os.path.exists(src):
+            shutil.move(src, dst)
 
-        # save model
-        torch.save(
-            {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
-        )
+    # model.pt => model_1.pt
+    shutil.move(os.path.join(data, "model.pt"), os.path.join(data, "model_1.pt"))
 
-        progress._meta_index_ += interval
+    # save model
+    torch.save(
+        {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
+    )
+
+    progress._meta_index_ += interval
+
+    if progress.n == progress.total:
+        return
 
     return
 
