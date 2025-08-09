@@ -802,6 +802,37 @@ def run_explore(data, image, total, batch, lr, device):
 
     weight = torch.tensor(f_weight(info), device=device)
 
+    env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
+
+    for i, model in zip(range(batch), cycle((model_base, model_tune))):
+        while True:
+            goal = (
+                random.randint(1, env_size - 2),
+                random.randint(1, env_size - 2),
+            )
+            start = (
+                random.randint(1, env_size - 2),
+                random.randint(1, env_size - 2),
+            )
+            if goal != start:
+                break
+        facing = random.choice(facing_space)
+
+        entry = f_sequence(
+            goal=goal,
+            start=start,
+            facing=facing,
+            image=image,
+            env_size=env_size,
+            max_steps=max_steps,
+            vocab=vocab,
+            weight=weight,
+            encoder=encoder,
+            model=model,
+            device=device,
+        )
+        print(f"Entry: {entry}")
+
     return
 
 
