@@ -190,6 +190,28 @@ def f_image(env_size, max_steps, goal, start, facing, image):
     return [filename]
 
 
+def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
+    return {
+        "text": f_text(
+            env_size=env_size,
+            max_steps=max_steps,
+            goal=goal,
+            start=start,
+            facing=facing,
+        ),
+        "image": f_image(
+            env_size=env_size,
+            max_steps=max_steps,
+            goal=goal,
+            start=start,
+            facing=facing,
+            image=image,
+        ),
+        "token": action,
+        "state": state,
+    }
+
+
 def f_inference(
     model,
     vocab,
@@ -260,6 +282,17 @@ def f_sequence(
 
     step = f_replay(env_size, max_steps, goal, start, facing, action)
     state = f_step(step=step, max_steps=max_steps)
+
+    return f_entry(
+        goal=goal,
+        start=start,
+        facing=facing,
+        image=image,
+        env_size=env_size,
+        max_steps=max_steps,
+        action=action,
+        state=state,
+    )
 
 
 def f_callback(
@@ -576,24 +609,15 @@ def run_spin(seed, data, image, max_steps):
 
                         f.write(
                             json.dumps(
-                                {
-                                    "text": f_text(
-                                        env_size=info["env"],
-                                        max_steps=info["max"],
-                                        goal=entry["goal"],
-                                        start=entry["start"],
-                                        facing=entry["facing"],
-                                    ),
-                                    "image": f_image(
-                                        env_size=info["env"],
-                                        max_steps=info["max"],
-                                        goal=entry["goal"],
-                                        start=entry["start"],
-                                        facing=entry["facing"],
-                                        image=image,
-                                    ),
-                                    "token": entry["action"],
-                                    "state": f_step(
+                                f_entry(
+                                    goal=entry["goal"],
+                                    start=entry["start"],
+                                    facing=entry["facing"],
+                                    image=image,
+                                    env_size=info["env"],
+                                    max_steps=info["max"],
+                                    action=entry["action"],
+                                    state=f_step(
                                         step=f_replay(
                                             env_size=info["env"],
                                             max_steps=info["max"],
@@ -604,7 +628,7 @@ def run_spin(seed, data, image, max_steps):
                                         ),
                                         max_steps=max_steps,
                                     ),
-                                },
+                                ),
                                 sort_keys=True,
                             )
                             + "\n"
@@ -816,6 +840,8 @@ def run_play(goal, start, facing, model, device):
             model=model,
             device=device,
         )
+
+        state, action = entry["state"], entry["token"]
 
     print(f"Play model: ({state}) {action}")
 
