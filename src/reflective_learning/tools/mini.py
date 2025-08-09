@@ -466,6 +466,30 @@ class PretrainDataset(torch.utils.data.IterableDataset):
                 yield self.datum_fn(datum=json.loads(selection))
 
 
+class FinetuneDataset(torch.utils.data.IterableDataset):
+    def __init__(self, database, prefix, start, final, datum_fn):
+        super().__init__()
+        self.database = database
+        self.prefix = prefix
+        self.start = start
+        self.final = final
+        self.datum_fn = datum_fn
+
+    def __iter__(self):
+        while True:
+            base = random.randrange(self.start, self.final)
+            tune = random.randrange(self.start, self.final)
+
+            base = f"{self.prefix}_{base:08d}".encode()
+            tune = f"{self.prefix}_{tune:08d}".encode()
+            with self.database.begin() as transaction:
+                base = transaction.get(base)
+                tune = transaction.get(tune)
+            entry = self.datum_fn(base=base, tune=tune)
+            if entry:
+                yield entry
+
+
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     step_width = len(str(max_steps))
     total_width = len(str(num_seeds))
@@ -917,6 +941,25 @@ def run_explore(data, image, total, lr, device):
                             f"stub_{batch_index:08d}".encode(),
                             json.dumps(entry, sort_keys=True).encode(),
                         )
+                dataset = FinetuneDataset(
+                    database,
+                    essential,
+                    reservoir,
+                    line_fn=functools.partial(
+                        f_datum,
+                        vocab_fn=lambda e: info["vocab"][e],
+                        state_fn=lambda e: info["state"][e],
+                        max_steps=info["max"],
+                        image=image,
+                        encoder=encoder,
+                        database=database,
+                    ),
+                )
+                loader = torch.utils.data.DataLoader(
+                    dataset,
+                    batch_size=batch,
+                    collate_fn=model.collate,
+                )
                 progress.update(batch_count)
 
     return
