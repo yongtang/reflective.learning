@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import functools
 import io
 import json
@@ -804,7 +805,7 @@ def run_explore(data, image, total, batch, lr, device):
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
-    for i, model in zip(range(batch), cycle((model_base, model_tune))):
+    for i, model in zip(range(batch), itertools.cycle((model_base, model_tune))):
         while True:
             goal = (
                 random.randint(1, env_size - 2),
