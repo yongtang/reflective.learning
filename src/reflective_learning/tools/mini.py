@@ -240,7 +240,7 @@ def f_novelty(model, token, prefix, device):
         logit = logit[C - 1 : C - 1 + token.size(0)]  # [T, V]
 
         # Per-step log-prob for the actual token
-        logp = F.log_softmax(logit, dim=-1)  # [T, V]
+        logp = torch.nn.functional.log_softmax(logit, dim=-1)  # [T, V]
         logp = logp.gather(-1, token.view(-1, 1)).squeeze(-1)  # [T]
 
         # -sum log-probs
