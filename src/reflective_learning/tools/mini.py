@@ -911,7 +911,7 @@ def run_explore(data, image, total, lr, device):
                     "novelty": novelty,
                 }
                 f.write(json.dumps(entry, sort_keys=True) + "\n")
-                with database.begin() as transaction:
+                with database.begin(write=True) as transaction:
                     transaction.put(
                         f"stub_{i:08d}".encode(),
                         json.dumps(entry, sort_keys=True).encode(),
