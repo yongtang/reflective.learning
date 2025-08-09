@@ -780,7 +780,7 @@ def run_learn(
     )
 
 
-def run_explore(data, image, total, batch, lr, device):
+def run_explore(data, image, total, lr, device):
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
@@ -805,6 +805,9 @@ def run_explore(data, image, total, batch, lr, device):
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
+    # 4GB = 1<<32
+    database = lmdb.open(data, map_size=1 << 32, readonly=False, create=True)
+
     total_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
@@ -812,63 +815,71 @@ def run_explore(data, image, total, batch, lr, device):
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
-    with tqdm(
-        total=total,
-        desc="Stub data",
-        dynamic_ncols=True,
-        unit="stub",
-        bar_format=bar_format,
-    ) as progress:
-        for start in range(0, total, batch):
-            final = min(start + batch, total)
-            with open(os.path.join(data, "stub.data"), "w") as f:
-                for i, model in zip(
-                    range(start, final), itertools.cycle((model_base, model_tune))
-                ):
-                    while True:
-                        goal = (
-                            random.randint(1, env_size - 2),
-                            random.randint(1, env_size - 2),
-                        )
-                        start = (
-                            random.randint(1, env_size - 2),
-                            random.randint(1, env_size - 2),
-                        )
-                        if goal != start:
-                            break
-                    facing = random.choice(facing_space)
-
-                    entry = f_sequence(
-                        goal=goal,
-                        start=start,
-                        facing=facing,
-                        image=image,
-                        env_size=env_size,
-                        max_steps=max_steps,
-                        vocab=vocab,
-                        weight=weight,
-                        encoder=encoder,
-                        model=model,
-                        device=device,
+    with open(os.path.join(data, "stub.data"), "w") as f:
+        with tqdm(
+            total=total,
+            desc="Stub data",
+            dynamic_ncols=True,
+            unit="stub",
+            bar_format=bar_format,
+        ) as progress:
+            for i, model in zip(
+                range(total), itertools.cycle((model_base, model_tune))
+            ):
+                while True:
+                    goal = (
+                        random.randint(1, env_size - 2),
+                        random.randint(1, env_size - 2),
                     )
-                    f.write(json.dumps(entry, sort_keys=True) + "\n")
+                    start = (
+                        random.randint(1, env_size - 2),
+                        random.randint(1, env_size - 2),
+                    )
+                    if goal != start:
+                        break
+                facing = random.choice(facing_space)
 
-                    progress.update(1)
+                entry = f_sequence(
+                    goal=goal,
+                    start=start,
+                    facing=facing,
+                    image=image,
+                    env_size=env_size,
+                    max_steps=max_steps,
+                    vocab=vocab,
+                    weight=weight,
+                    encoder=encoder,
+                    model=model,
+                    device=device,
+                )
+                f.write(json.dumps(entry, sort_keys=True) + "\n")
 
-    with tqdm(
-        total=total,
-        desc="Stub lmdb",
-        dynamic_ncols=True,
-        unit="stub",
-        bar_format=bar_format,
-    ) as progress:
-        for start in range(0, total, batch):
-            final = min(start + batch, total)
-            with open(os.path.join(data, "stub.data"), "r") as f:
-                for i in range(start, final):
-                    entry = json.loads(file.readline())
+                progress.update(1)
 
-                    progress.update(1)
+    with open(os.path.join(data, "stub.data"), "r") as f:
+        with tqdm(
+            total=total,
+            desc="Stub lmdb",
+            dynamic_ncols=True,
+            unit="stub",
+            bar_format=bar_format,
+        ) as progress:
+            for i in range(total):
+                entry = json.loads(f.readline())
+
+                entry = {
+                    "text": entry["text"],
+                    "image": entry["image"],
+                    "token": entry["token"],
+                    "state": entry["state"],
+                }
+                with database.begin() as transaction:
+                    transaction.put(
+                        f"stub_{i:08d}".encode(),
+                        json.dumps(entry, sort_keys=True).encode(),
+                    )
+
+                progress.update(1)
 
     return
 
@@ -957,7 +968,6 @@ def main():
     explore_parser.add_argument("--data", required=True)
     explore_parser.add_argument("--image", required=True)
     explore_parser.add_argument("--total", type=int, required=True)
-    explore_parser.add_argument("--batch", type=int, required=True)
     explore_parser.add_argument("--lr", type=float, required=True)
     explore_parser.add_argument("--device")
 
@@ -1005,7 +1015,6 @@ def main():
             data=args.data,
             image=args.image,
             total=args.total,
-            batch=args.batch,
             lr=args.lr,
             device=args.device,
         )
