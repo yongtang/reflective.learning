@@ -213,38 +213,27 @@ def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
     }
 
 
-def f_novelty(model, token, prefix, device):
+def f_novelty(model, prefix, token, state, device):
     model.eval()
 
-    model = model.to(device)
-    token = token.to(device)
-    prefix = prefix.to(device)
-
     with torch.no_grad():
-        V = model.vocab_size
-        C = prefix.size(0)
+        model = model.to(device)
 
-        # Project tokens and prepend prefix
-        embed = torch.nn.functional.one_hot(token, num_classes=V).float()  # [T, V]
-        embed = model.input_linear(embed)  # [T, D]
-        embed = torch.cat([prefix, embed], dim=0)  # [C+T, D]
-        embed = embed.unsqueeze(0)  # [1, C+T, D]
+        prefix = prefix.to(device)
+        token = token.to(device)
+        state = state.to(device)
 
-        # Full attention mask (no padding here)
-        mask = torch.ones(1, C + token.size(0), dtype=torch.bool, device=device)
-
-        # Run transformer
-        logit = model.call(mask=mask, embed=embed)[0]  # [C+T, V]
-
-        # Slice positions that predict each token
-        logit = logit[C - 1 : C - 1 + token.size(0)]  # [T, V]
-
-        # Per-step log-prob for the actual token
-        logp = torch.nn.functional.log_softmax(logit, dim=-1)  # [T, V]
-        logp = logp.gather(-1, token.view(-1, 1)).squeeze(-1)  # [T]
-
-        # -sum log-probs
-        return -logp.sum()
+        return model.prob(
+            *model.collate(
+                [
+                    {
+                        "prefix": prefix,
+                        "token": token,
+                        "state": state,
+                    }
+                ]
+            )
+        )
 
 
 def f_inference(
