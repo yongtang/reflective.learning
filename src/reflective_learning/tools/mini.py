@@ -158,27 +158,14 @@ def f_model(info):
     return model
 
 
-def f_weight(info):
-    assert list(sorted(info["state"].values())) == list(
-        range(len(info["state"]))
-    ), f"{info['state']}"
-
-    weight = list(sorted((info["state"][k], v) for k, v in info["weight"].items()))
-    assert list(i for i, v in weight) == list(
-        range(len(info["state"]))
-    ), f"{info['weight']} vs. {info['state']}"
-    weight = list(v for i, v in weight)
-
-    return weight
-
-
-def f_text(env_size, max_steps, goal, start, facing):
+def f_text(env_size, max_steps, goal, start, facing, state):
     return [
         f"env {env_size}",
         f"goal {goal[0]},{goal[1]}",
         f"start {start[0]},{start[1]}",
         f"facing {facing}",
         f"max {max_steps}",
+        f"state {state}",
     ]
 
 
@@ -199,6 +186,7 @@ def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
             goal=goal,
             start=start,
             facing=facing,
+            state=state,
         ),
         "image": f_image(
             env_size=env_size,
@@ -263,11 +251,11 @@ def f_sequence(
     goal,
     start,
     facing,
+    state,
     image,
     env_size,
     max_steps,
     vocab,
-    weight,
     encoder,
     model,
     device,
@@ -279,6 +267,7 @@ def f_sequence(
         goal=goal,
         start=start,
         facing=facing,
+        state=state,
     )
     entry_image = f_image(
         env_size=env_size,
@@ -304,8 +293,10 @@ def f_sequence(
         device=device,
     )
 
-    step = f_replay(env_size, max_steps, goal, start, facing, action)
-    state = f_step(step=step, max_steps=max_steps)
+    state = f_step(
+        step=f_replay(env_size, max_steps, goal, start, facing, action),
+        max_steps=max_steps,
+    )
 
     return f_entry(
         goal=goal,
@@ -601,7 +592,6 @@ def run_spin(seed, data, image, max_steps):
         "max": max_steps,
         "vocab": {e.name: (action_space.index(e)) for e in action_space},
         "state": {"success": 0, "failure": 1},
-        "weight": {"success": 1.0, "failure": 0.1},
         "layer": {
             "d_model": 768,
             "nhead": 12,
@@ -714,8 +704,6 @@ def run_learn(
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    weight = torch.tensor(f_weight(info), device=device)
-
     # 4GB = 1<<32
     database = lmdb.open(data, map_size=1 << 32, readonly=False, create=True)
 
@@ -812,7 +800,6 @@ def run_learn(
         model=model,
         loader=loader,
         optimizer=optimizer,
-        weight=weight,
         total=total,
         callback=functools.partial(
             f_callback,
@@ -844,8 +831,6 @@ def run_explore(data, image, total, lr, device):
     print(f"Load model: {os.path.join(data, 'model.pt')}")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
-
-    weight = torch.tensor(f_weight(info), device=device)
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
@@ -905,7 +890,6 @@ def run_explore(data, image, total, lr, device):
                         env_size=env_size,
                         max_steps=max_steps,
                         vocab=vocab,
-                        weight=weight,
                         encoder=encoder,
                         model=model,
                         device=device,
@@ -981,20 +965,19 @@ def run_play(goal, start, facing, model, device):
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    weight = torch.tensor(f_weight(info), device=device)
-
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
+    state = next((k for k, v in info["state"].items() if v == 0))
     with tempfile.TemporaryDirectory() as image:
         entry = f_sequence(
             goal=goal,
             start=start,
             facing=facing,
+            state=state,
             image=image,
             env_size=env_size,
             max_steps=max_steps,
             vocab=vocab,
-            weight=weight,
             encoder=encoder,
             model=model,
             device=device,
