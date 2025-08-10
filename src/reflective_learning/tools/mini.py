@@ -674,7 +674,7 @@ def run_spin(seed, data, image, max_steps):
     print(f"Save model: {os.path.join(data, 'model.pt')}")
 
 
-def run_learn(
+def run_pretrain(
     data,
     image,
     total,
@@ -807,7 +807,7 @@ def run_learn(
     )
 
 
-def run_explore(data, image, total, lr, device):
+def run_discover(data, image, total, lr, device):
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
@@ -914,10 +914,8 @@ def run_explore(data, image, total, lr, device):
                             f"stub_{batch_index:08d}".encode(),
                             json.dumps(entry, sort_keys=True).encode(),
                         )
-                dataset = FinetuneDataset(
+                dataset = DiscoverDataset(
                     database,
-                    essential,
-                    reservoir,
                     line_fn=functools.partial(
                         f_datum,
                         vocab_fn=lambda e: info["vocab"][e],
@@ -1005,24 +1003,24 @@ def main():
     spin_parser.add_argument("--image", required=True)
     spin_parser.add_argument("--max-steps", type=int, required=True)
 
-    # ---- learn mode ----
-    learn_parser = subparsers.add_parser("learn", help="Learn mode")
-    learn_parser.add_argument("--data", required=True)
-    learn_parser.add_argument("--image", required=True)
-    learn_parser.add_argument("--total", type=int, required=True)
-    learn_parser.add_argument("--batch", type=int, required=True)
-    learn_parser.add_argument("--reservoir", type=int, required=True)
-    learn_parser.add_argument("--interval", type=int, required=True)
-    learn_parser.add_argument("--lr", type=float, required=True)
-    learn_parser.add_argument("--device")
+    # ---- pretrain mode ----
+    pretrain_parser = subparsers.add_parser("pretrain", help="Pretrain mode")
+    pretrain_parser.add_argument("--data", required=True)
+    pretrain_parser.add_argument("--image", required=True)
+    pretrain_parser.add_argument("--total", type=int, required=True)
+    pretrain_parser.add_argument("--batch", type=int, required=True)
+    pretrain_parser.add_argument("--reservoir", type=int, required=True)
+    pretrain_parser.add_argument("--interval", type=int, required=True)
+    pretrain_parser.add_argument("--lr", type=float, required=True)
+    pretrain_parser.add_argument("--device")
 
-    # ---- explore mode ----
-    explore_parser = subparsers.add_parser("explore", help="Explore mode")
-    explore_parser.add_argument("--data", required=True)
-    explore_parser.add_argument("--image", required=True)
-    explore_parser.add_argument("--total", type=int, required=True)
-    explore_parser.add_argument("--lr", type=float, required=True)
-    explore_parser.add_argument("--device")
+    # ---- discover mode ----
+    discover_parser = subparsers.add_parser("discover", help="Discover mode")
+    discover_parser.add_argument("--data", required=True)
+    discover_parser.add_argument("--image", required=True)
+    discover_parser.add_argument("--total", type=int, required=True)
+    discover_parser.add_argument("--lr", type=float, required=True)
+    discover_parser.add_argument("--device")
 
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Perform mode")
@@ -1051,8 +1049,8 @@ def main():
             max_steps=args.max_steps,
         )
 
-    elif args.mode == "learn":
-        run_learn(
+    elif args.mode == "pretrain":
+        run_pretrain(
             data=args.data,
             image=args.image,
             total=args.total,
@@ -1063,8 +1061,8 @@ def main():
             device=args.device,
         )
 
-    elif args.mode == "explore":
-        run_explore(
+    elif args.mode == "discover":
+        run_discover(
             data=args.data,
             image=args.image,
             total=args.total,
