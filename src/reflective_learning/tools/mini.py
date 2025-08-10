@@ -482,10 +482,9 @@ class PretrainDataset(torch.utils.data.IterableDataset):
 
 
 class DiscoverDataset(torch.utils.data.IterableDataset):
-    def __init__(self, database, prefix, start, final, datum_fn):
+    def __init__(self, database, start, final, datum_fn):
         super().__init__()
         self.database = database
-        self.prefix = prefix
         self.start = start
         self.final = final
         self.datum_fn = datum_fn
@@ -493,7 +492,7 @@ class DiscoverDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         while True:
             selection = random.randint(0, self.essential - 1)
-            selection = f"{self.prefix}_{selection:08d}".encode()
+            selection = f"stub_{selection:08d}".encode()
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
             if selection:
@@ -938,7 +937,6 @@ def run_discover(data, image, total, epoch, batch, lr, device):
 
     dataset = DiscoverDataset(
         database=database,
-        prefix="stub_"
         start=0,
         final=total,
         datum_fn=functools.partial(
