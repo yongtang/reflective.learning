@@ -463,7 +463,7 @@ class PretrainDataset(torch.utils.data.IterableDataset):
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
             if selection:
-                yield self.datum_fn(datum=json.loads(selection))
+                yield self.datum_fn(entry=json.loads(selection))
 
 
 class FinetuneDataset(torch.utils.data.IterableDataset):
