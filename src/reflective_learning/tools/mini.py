@@ -791,7 +791,7 @@ def run_learn(
         database,
         essential,
         reservoir,
-        line_fn=functools.partial(
+        datum_fn=functools.partial(
             f_datum,
             vocab_fn=lambda e: info["vocab"][e],
             state_fn=lambda e: info["state"][e],
