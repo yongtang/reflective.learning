@@ -839,13 +839,13 @@ def run_discover(data, image, total, epoch, batch, lr, device):
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    model_base = f_model(info).to(device)
-    model_base.load_state_dict(weight)
-    model_base.to(device)
+    base = f_model(info).to(device)
+    base.load_state_dict(weight)
+    base.to(device)
 
-    model_tune = f_model(info).to(device)
-    model_tune.load_state_dict(weight)
-    model_tune.to(device)
+    model = f_model(info).to(device)
+    model.load_state_dict(weight)
+    model.to(device)
 
     print(f"Load model: {os.path.join(data, 'model.pt')}")
 
@@ -907,7 +907,7 @@ def run_discover(data, image, total, epoch, batch, lr, device):
                     max_steps=max_steps,
                     vocab=vocab,
                     encoder=encoder,
-                    model=model_base,
+                    model=base,
                     device=device,
                 )
                 token = torch.tensor(
@@ -958,10 +958,12 @@ def run_discover(data, image, total, epoch, batch, lr, device):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     discover(
+        base=base,
         model=model,
         loader=loader,
         optimizer=optimizer,
         total=total,
+        epoch=epoch,
         callback=functools.partial(
             f_callback,
             info=info,
