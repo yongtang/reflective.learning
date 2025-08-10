@@ -201,29 +201,6 @@ def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
     }
 
 
-def f_novelty(model, prefix, token, state, device):
-    model.eval()
-
-    with torch.no_grad():
-        model = model.to(device)
-
-        prefix = prefix.to(device)
-        token = token.to(device)
-        state = state.to(device)
-
-        return model.prob(
-            *model.collate(
-                [
-                    {
-                        "prefix": prefix,
-                        "token": token,
-                        "state": state,
-                    }
-                ]
-            )
-        )
-
-
 def f_inference(
     model,
     vocab,
@@ -905,18 +882,11 @@ def run_explore(data, image, total, lr, device):
                         database=database,
                         image=image,
                     )
-                    novelty = f_novelty(
-                        model=model_base,
-                        token=token,
-                        prefix=prefix,
-                        device=device,
-                    ).item()
                     entry = {
                         "text": entry["text"],
                         "image": entry["image"],
                         "token": entry["token"],
                         "state": entry["state"],
-                        "novelty": novelty,
                     }
                     f.write(json.dumps(entry, sort_keys=True) + "\n")
                     with database.begin(write=True) as transaction:
