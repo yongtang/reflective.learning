@@ -856,13 +856,14 @@ def run_explore(data, image, total, lr, device):
                     if goal != start:
                         break
                 facing = random.choice(facing_space)
-                for batch_index, model in zip(
-                    range(batch_count), itertools.cycle((model_base, model_tune))
+                for batch_index, state in zip(
+                    range(batch_count), itertools.cycle(info["state"].values())
                 ):
                     entry = f_sequence(
                         goal=goal,
                         start=start,
                         facing=facing,
+                        state=state,
                         image=image,
                         env_size=env_size,
                         max_steps=max_steps,
