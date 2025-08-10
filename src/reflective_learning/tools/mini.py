@@ -17,7 +17,7 @@ import torch
 from tqdm import tqdm
 
 from reflective_learning.encoder import ContextEncoder
-from reflective_learning.inference import sequence
+from reflective_learning.inference import sequence, explore
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import pretrain
 
@@ -201,29 +201,6 @@ def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
     }
 
 
-def f_inference(
-    model,
-    vocab,
-    maximum,
-    prefix,
-    device,
-):
-
-    token = sequence(
-        model=model,
-        prefix=prefix,
-        maximum=maximum,
-        device=device,
-    )
-    action = token.tolist()
-    action = action[: action.index(0) + 1] if 0 in action else action
-
-    symbol = {v: k for k, v in vocab.items()}
-    action = [symbol[e] for e in action]
-
-    return action
-
-
 def f_sequence(
     goal,
     start,
@@ -262,13 +239,84 @@ def f_sequence(
         image=image,
     )
 
-    action = f_inference(
+    token = sequence(
         model=model,
-        vocab=vocab,
-        maximum=max_steps,
         prefix=prefix,
+        maximum=max_steps,
         device=device,
     )
+    action = token.tolist()
+    action = action[: action.index(0) + 1] if 0 in action else action
+
+    symbol = {v: k for k, v in vocab.items()}
+    action = [symbol[e] for e in action]
+
+    state = f_step(
+        step=f_replay(env_size, max_steps, goal, start, facing, action),
+        max_steps=max_steps,
+    )
+
+    return f_entry(
+        goal=goal,
+        start=start,
+        facing=facing,
+        image=image,
+        env_size=env_size,
+        max_steps=max_steps,
+        action=action,
+        state=state,
+    )
+
+
+def f_explore(
+    goal,
+    start,
+    facing,
+    state,
+    image,
+    env_size,
+    max_steps,
+    vocab,
+    encoder,
+    model,
+    device,
+):
+    prefixes = [
+        f_prefix(
+            entry_text=f_text(
+                env_size=env_size,
+                max_steps=max_steps,
+                goal=goal,
+                start=start,
+                facing=facing,
+                state=e,
+            ),
+            entry_image=f_image(
+                env_size=env_size,
+                max_steps=max_steps,
+                goal=goal,
+                start=start,
+                facing=facing,
+                image=image,
+            ),
+            encoder=encoder,
+            database=None,
+            image=image,
+        )
+        for e in state
+    ]
+
+    token = explore(
+        model=model,
+        prefixes=prefixes,
+        maximum=max_steps,
+        device=device,
+    )
+    action = token.tolist()
+    action = action[: action.index(0) + 1] if 0 in action else action
+
+    symbol = {v: k for k, v in vocab.items()}
+    action = [symbol[e] for e in action]
 
     state = f_step(
         step=f_replay(env_size, max_steps, goal, start, facing, action),
@@ -860,9 +908,7 @@ def run_discover(data, image, total, epoch, batch, lr, device):
             unit="stub",
             bar_format=bar_format,
         ) as progress:
-            for index, state in zip(
-                range(total), itertools.cycle(info["state"].values())
-            ):
+            for index in range(total):
                 while True:
                     goal = (
                         random.randint(1, env_size - 2),
@@ -876,11 +922,11 @@ def run_discover(data, image, total, epoch, batch, lr, device):
                         break
                 facing = random.choice(facing_space)
 
-                entry = f_sequence(
+                entry = f_explore(
                     goal=goal,
                     start=start,
                     facing=facing,
-                    state=state,
+                    state=info["state"].values(),
                     image=image,
                     env_size=env_size,
                     max_steps=max_steps,
