@@ -807,7 +807,7 @@ def run_pretrain(
     )
 
 
-def run_discover(data, image, total, lr, device):
+def run_discover(data, image, total, epoch, batch, lr, device):
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
@@ -860,9 +860,9 @@ def run_discover(data, image, total, lr, device):
             unit="stub",
             bar_format=bar_format,
         ) as progress:
-            for batch_start in range(0, total, batch):
-                batch_final = min(batch_start + batch, total)
-                batch_count = batch_final - batch_start
+            for index, state in zip(
+                range(total), itertools.cycle(info["state"].values())
+            ):
                 while True:
                     goal = (
                         random.randint(1, env_size - 2),
@@ -875,45 +875,45 @@ def run_discover(data, image, total, lr, device):
                     if goal != start:
                         break
                 facing = random.choice(facing_space)
-                for batch_index, state in zip(
-                    range(batch_count), itertools.cycle(info["state"].values())
-                ):
-                    entry = f_sequence(
-                        goal=goal,
-                        start=start,
-                        facing=facing,
-                        state=state,
-                        image=image,
-                        env_size=env_size,
-                        max_steps=max_steps,
-                        vocab=vocab,
-                        encoder=encoder,
-                        model=model,
-                        device=device,
+
+                entry = f_sequence(
+                    goal=goal,
+                    start=start,
+                    facing=facing,
+                    state=state,
+                    image=image,
+                    env_size=env_size,
+                    max_steps=max_steps,
+                    vocab=vocab,
+                    encoder=encoder,
+                    model=model,
+                    device=device,
+                )
+                token = torch.tensor(
+                    [vocab[e] for e in entry["token"]],
+                    dtype=torch.long,
+                )
+                prefix = f_prefix(
+                    entry_text=entry["text"],
+                    entry_image=entry["image"],
+                    encoder=encoder,
+                    database=database,
+                    image=image,
+                )
+                entry = {
+                    "text": entry["text"],
+                    "image": entry["image"],
+                    "token": entry["token"],
+                    "state": entry["state"],
+                }
+                f.write(json.dumps(entry, sort_keys=True) + "\n")
+                with database.begin(write=True) as transaction:
+                    transaction.put(
+                        f"stub_{index:08d}".encode(),
+                        json.dumps(entry, sort_keys=True).encode(),
                     )
-                    token = torch.tensor(
-                        [vocab[e] for e in entry["token"]],
-                        dtype=torch.long,
-                    )
-                    prefix = f_prefix(
-                        entry_text=entry["text"],
-                        entry_image=entry["image"],
-                        encoder=encoder,
-                        database=database,
-                        image=image,
-                    )
-                    entry = {
-                        "text": entry["text"],
-                        "image": entry["image"],
-                        "token": entry["token"],
-                        "state": entry["state"],
-                    }
-                    f.write(json.dumps(entry, sort_keys=True) + "\n")
-                    with database.begin(write=True) as transaction:
-                        transaction.put(
-                            f"stub_{batch_index:08d}".encode(),
-                            json.dumps(entry, sort_keys=True).encode(),
-                        )
+                progress.update(1)
+                """
                 dataset = DiscoverDataset(
                     database,
                     line_fn=functools.partial(
@@ -932,6 +932,7 @@ def run_discover(data, image, total, lr, device):
                     collate_fn=model.collate,
                 )
                 progress.update(batch_count)
+                """
 
     return
 
@@ -1019,6 +1020,8 @@ def main():
     discover_parser.add_argument("--data", required=True)
     discover_parser.add_argument("--image", required=True)
     discover_parser.add_argument("--total", type=int, required=True)
+    discover_parser.add_argument("--epoch", type=int, required=True)
+    discover_parser.add_argument("--batch", type=int, required=True)
     discover_parser.add_argument("--lr", type=float, required=True)
     discover_parser.add_argument("--device")
 
@@ -1066,6 +1069,8 @@ def main():
             data=args.data,
             image=args.image,
             total=args.total,
+            epoch=args.epoch,
+            batch=args.batch,
             lr=args.lr,
             device=args.device,
         )
