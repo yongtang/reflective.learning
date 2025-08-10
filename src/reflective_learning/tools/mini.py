@@ -907,7 +907,7 @@ def run_discover(data, image, total, epoch, batch, lr, device):
                     max_steps=max_steps,
                     vocab=vocab,
                     encoder=encoder,
-                    model=base,
+                    model=model,
                     device=device,
                 )
                 token = torch.tensor(
