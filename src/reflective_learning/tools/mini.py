@@ -1,7 +1,7 @@
 import argparse
-import itertools
 import functools
 import io
+import itertools
 import json
 import operator
 import os
@@ -17,9 +17,9 @@ import torch
 from tqdm import tqdm
 
 from reflective_learning.encoder import ContextEncoder
-from reflective_learning.inference import sequence, explore
+from reflective_learning.inference import explore, sequence
 from reflective_learning.model import ReflectiveCore
-from reflective_learning.train import pretrain
+from reflective_learning.train import discover, pretrain
 
 action_space = [
     minigrid.core.actions.Actions.done,
@@ -959,26 +959,39 @@ def run_discover(data, image, total, epoch, batch, lr, device):
                         json.dumps(entry, sort_keys=True).encode(),
                     )
                 progress.update(1)
-                """
-                dataset = DiscoverDataset(
-                    database,
-                    line_fn=functools.partial(
-                        f_datum,
-                        vocab_fn=lambda e: info["vocab"][e],
-                        state_fn=lambda e: info["state"][e],
-                        max_steps=info["max"],
-                        image=image,
-                        encoder=encoder,
-                        database=database,
-                    ),
-                )
-                loader = torch.utils.data.DataLoader(
-                    dataset,
-                    batch_size=batch,
-                    collate_fn=model.collate,
-                )
-                progress.update(batch_count)
-                """
+    dataset = DiscoverDataset(
+        database,
+        line_fn=functools.partial(
+            f_datum,
+            vocab_fn=lambda e: info["vocab"][e],
+            state_fn=lambda e: info["state"][e],
+            max_steps=info["max"],
+            image=image,
+            encoder=encoder,
+            database=database,
+        ),
+    )
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch,
+        collate_fn=model.collate,
+    )
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    discover(
+        model=model,
+        loader=loader,
+        optimizer=optimizer,
+        total=total,
+        callback=functools.partial(
+            f_callback,
+            info=info,
+            data=data,
+            interval=interval,
+        ),
+        device=device,
+    )
 
     return
 
