@@ -92,3 +92,16 @@ def pretrain(
 
             if count >= total:
                 break
+
+
+def discover(
+    base: ReflectiveCore,
+    model: ReflectiveCore,
+    loader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    total: int,
+    epoch: int,
+    callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
+    device: Optional[torch.device] = None,
+):
+    pass
