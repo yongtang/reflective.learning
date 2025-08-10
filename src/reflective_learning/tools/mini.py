@@ -697,16 +697,7 @@ def run_spin(seed, data, image, max_steps):
     print(f"Save model: {os.path.join(data, 'model.pt')}")
 
 
-def run_pretrain(
-    data,
-    image,
-    total,
-    batch,
-    reservoir,
-    interval,
-    lr,
-    device,
-):
+def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
@@ -830,7 +821,7 @@ def run_pretrain(
     )
 
 
-def run_discover(data, image, total, epoch, batch, lr, device):
+def run_discover(data, image, total, batch, epoch, interval, lr, device):
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
@@ -1059,8 +1050,9 @@ def main():
     discover_parser.add_argument("--data", required=True)
     discover_parser.add_argument("--image", required=True)
     discover_parser.add_argument("--total", type=int, required=True)
-    discover_parser.add_argument("--epoch", type=int, required=True)
     discover_parser.add_argument("--batch", type=int, required=True)
+    discover_parser.add_argument("--epoch", type=int, required=True)
+    discover_parser.add_argument("--interval", type=int, required=True)
     discover_parser.add_argument("--lr", type=float, required=True)
     discover_parser.add_argument("--device")
 
@@ -1108,8 +1100,9 @@ def main():
             data=args.data,
             image=args.image,
             total=args.total,
-            epoch=args.epoch,
             batch=args.batch,
+            epoch=args.epoch,
+            interval=args.interval,
             lr=args.lr,
             device=args.device,
         )
