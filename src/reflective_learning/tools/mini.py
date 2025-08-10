@@ -500,30 +500,6 @@ class DiscoverDataset(torch.utils.data.IterableDataset):
                 yield self.datum_fn(entry=json.loads(selection))
 
 
-class FinetuneDataset(torch.utils.data.IterableDataset):
-    def __init__(self, database, prefix, start, final, datum_fn):
-        super().__init__()
-        self.database = database
-        self.prefix = prefix
-        self.start = start
-        self.final = final
-        self.datum_fn = datum_fn
-
-    def __iter__(self):
-        while True:
-            base = random.randrange(self.start, self.final)
-            tune = random.randrange(self.start, self.final)
-
-            base = f"{self.prefix}_{base:08d}".encode()
-            tune = f"{self.prefix}_{tune:08d}".encode()
-            with self.database.begin() as transaction:
-                base = transaction.get(base)
-                tune = transaction.get(tune)
-            entry = self.datum_fn(base=base, tune=tune)
-            if entry:
-                yield entry
-
-
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     step_width = len(str(max_steps))
     total_width = len(str(num_seeds))
@@ -819,9 +795,9 @@ def run_pretrain(
         )
 
     dataset = PretrainDataset(
-        database,
-        essential,
-        reservoir,
+        database=database,
+        essential=essential,
+        reservoir=reservoir,
         datum_fn=functools.partial(
             f_datum,
             vocab_fn=lambda e: info["vocab"][e],
@@ -959,9 +935,13 @@ def run_discover(data, image, total, epoch, batch, lr, device):
                         json.dumps(entry, sort_keys=True).encode(),
                     )
                 progress.update(1)
+
     dataset = DiscoverDataset(
-        database,
-        line_fn=functools.partial(
+        database=database,
+        prefix="stub_"
+        start=0,
+        final=total,
+        datum_fn=functools.partial(
             f_datum,
             vocab_fn=lambda e: info["vocab"][e],
             state_fn=lambda e: info["state"][e],
