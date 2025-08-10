@@ -416,7 +416,6 @@ def f_prefix(entry_text, entry_image, encoder, database, image):
     return encoder.encode_embed(text=text_embed, image=image_embed)
 
 
-@functools.lru_cache(maxsize=4096)
 def f_datum(vocab_fn, state_fn, max_steps, image, encoder, database, entry):
     assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
 
