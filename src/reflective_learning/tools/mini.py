@@ -959,6 +959,10 @@ def run_discover(data, image, total, batch, epoch, lr, device):
     return
 
 
+def run_finetune(data, image, model, device):
+    assert False
+
+
 def run_play(goal, start, facing, model, device):
 
     info, weight = operator.itemgetter("info", "weight")(
