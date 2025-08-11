@@ -183,6 +183,7 @@ def discover(
     optimizer: torch.optim.Optimizer,
     total: int,
     epoch: int,
+    callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
     device: Optional[torch.device] = None,
 ):
     """
@@ -195,6 +196,7 @@ def discover(
         optimizer: Optimizer for updating model parameters.
         total: Total number of training samples to process.
         epoch: Total number of training epoch rounds to process.
+        callback: A function called periodically during training.
         device: Optional device override (defaults to CUDA if available).
     """
 
