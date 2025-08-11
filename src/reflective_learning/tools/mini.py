@@ -979,6 +979,8 @@ def run_discover(data, image, total, batch, epoch, lr, device):
 
 
 def run_finetune(data, image, model, device):
+    choice = state_space[0]
+
     with open(os.path.join(data, "info.json"), "r") as f:
         info = json.loads(f.read())
     print(f"Load info: {json.dumps(info, sort_keys=True)}")
