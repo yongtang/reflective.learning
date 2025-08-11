@@ -207,7 +207,11 @@ def discover(
     )
 
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+    for model in baseline:
+        model.to(device)
+        model.eval()
+    for model in finetune:
+        model.to(device)
 
     count = 0
 
@@ -219,8 +223,6 @@ def discover(
         unit="sample",
     ) as progress:
         for batch in loader:
-            model.train()
-
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L]
             embed = batch["embed"].to(device)  # [B, L, D]
