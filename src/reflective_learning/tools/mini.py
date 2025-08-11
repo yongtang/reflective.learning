@@ -838,22 +838,23 @@ def run_pretrain(choice, data, image, total, batch, reservoir, interval, lr, dev
 
 def run_discover(data, image, total, batch, epoch, lr, device):
 
-    info, weight = operator.itemgetter("info", "weight")(
-        torch.load(os.path.join(data, "model.pt"), map_location="cpu")
-    )
-    print(f"Load info: {json.dumps(info, sort_keys=True)}")
-
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    base = f_model(info).to(device)
-    base.load_state_dict(weight)
-    base.to(device)
+    with open(os.path.join(data, "info.json"), "r") as f:
+        info = json.loads(f.read())
+    print(f"Load info: {json.dumps(info, sort_keys=True)}")
 
-    model = f_model(info).to(device)
-    model.load_state_dict(weight)
-    model.to(device)
+    def f_load(choice):
+        weight = torch.load(
+            os.path.join(data, f"model.{choice}.pt"), map_location="cpu"
+        )
+        model = f_model(info).to(device)
+        model.load_state_dict(weight)
+        model.to(device)
+        print(f"Load model: {os.path.join(data, 'model.{choice}.pt')}")
+        return model
 
-    print(f"Load model: {os.path.join(data, 'model.pt')}")
+    model = tuple(f_load(choice) for choice in state_space)
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
@@ -880,6 +881,8 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         f"{{n:{total_width}d}}/{{total:{total_width}d}} "
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
+
+    assert False
 
     with open(os.path.join(data, "stub.data"), "w") as f:
         with tqdm(
