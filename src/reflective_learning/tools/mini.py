@@ -978,14 +978,16 @@ def run_discover(data, image, total, batch, epoch, lr, device):
     return
 
 
-def run_finetune(data, image, model, device):
+def run_finetune(data, image, device):
     with open(os.path.join(data, "info.json"), "r") as f:
         info = json.loads(f.read())
     print(f"Load info: {json.dumps(info, sort_keys=True)}")
 
     weight = torch.load(os.path.join(data, f"model.{choice}.pt"), map_location="cpu")
 
-    torch.save({"info": info, "weight": model.state_dict()}, model)
+    torch.save(
+        {"info": info, "weight": model.state_dict()}, os.path.join(data, f"model.pt")
+    )
 
 
 def run_play(goal, start, facing, model, device):
@@ -1141,7 +1143,6 @@ def main():
         run_finetune(
             data=args.data,
             image=args.image,
-            model=args.model,
             device=args.device,
         )
 
