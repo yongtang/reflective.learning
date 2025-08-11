@@ -662,12 +662,12 @@ def run_spin(seed, data, image, max_steps):
                 if line.strip():
                     progress.update(1)
 
+                    entry = json.loads(line)
+                    env_size.add(entry["env"])
                     assert (
                         len(entry["action"]) <= max_steps
                     ), f"{max_steps} vs. {entry['action']}"
 
-                    entry = json.loads(line)
-                    env_size.add(entry["env"])
     assert len(env_size) == 1, f"{env_size}"
     env_size = next(iter(env_size))
 
