@@ -158,14 +158,13 @@ def f_model(info):
     return model
 
 
-def f_text(env_size, max_steps, goal, start, facing, state):
+def f_text(env_size, max_steps, goal, start, facing):
     return [
         f"env {env_size}",
         f"goal {goal[0]},{goal[1]}",
         f"start {start[0]},{start[1]}",
         f"facing {facing}",
         f"max {max_steps}",
-        f"state {state}",
     ]
 
 
@@ -186,7 +185,6 @@ def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
             goal=goal,
             start=start,
             facing=facing,
-            state=state,
         ),
         "image": f_image(
             env_size=env_size,
@@ -221,7 +219,6 @@ def f_sequence(
         goal=goal,
         start=start,
         facing=facing,
-        state=state,
     )
     entry_image = f_image(
         env_size=env_size,
@@ -289,7 +286,6 @@ def f_explore(
                 goal=goal,
                 start=start,
                 facing=facing,
-                state=e,
             ),
             entry_image=f_image(
                 env_size=env_size,
@@ -596,13 +592,12 @@ def run_spin(seed, data, image, max_steps):
                 if line.strip():
                     progress.update(1)
 
-                    entry = json.loads(line)
-
-                    env_size.add(entry["env"])
-
                     assert (
                         len(entry["action"]) <= max_steps
                     ), f"{max_steps} vs. {entry['action']}"
+
+                    entry = json.loads(line)
+                    env_size.add(entry["env"])
     assert len(env_size) == 1, f"{env_size}"
     env_size = next(iter(env_size))
 
@@ -637,64 +632,70 @@ def run_spin(seed, data, image, max_steps):
 
     os.makedirs(data, exist_ok=True)
 
-    with open(os.path.join(data, "seed.data"), "w") as f:
-        with open(seed, "r") as g:
-            with tqdm(
-                total=total,
-                desc="Seed entry",
-                dynamic_ncols=True,
-                bar_format=bar_format,
-                unit="seed",
-            ) as progress:
+    for choice in info["env"]:
+        with open(os.path.join(data, f"seed.{choice}.data"), "w") as f:
+            with open(seed, "r") as g:
+                with tqdm(
+                    total=total,
+                    desc="Seed {choice} entry",
+                    dynamic_ncols=True,
+                    bar_format=bar_format,
+                    unit="seed",
+                ) as progress:
 
-                for line in g:
-                    if line.strip():
-                        progress.update(1)
+                    for line in g:
+                        if line.strip():
+                            progress.update(1)
 
-                        entry = json.loads(line)
+                            entry = json.loads(line)
 
-                        assert entry["env"] == info["env"], f"{entry} vs. {info}"
-                        assert (
-                            len(entry["action"]) <= info["max"]
-                        ), f"{entry} vs. {info}"
-                        assert all(
-                            e in info["vocab"].keys() for e in entry["action"]
-                        ), f"{entry} vs. {info}"
+                            assert entry["env"] == info["env"], f"{entry} vs. {info}"
+                            assert (
+                                len(entry["action"]) <= info["max"]
+                            ), f"{entry} vs. {info}"
+                            assert all(
+                                e in info["vocab"].keys() for e in entry["action"]
+                            ), f"{entry} vs. {info}"
 
-                        f.write(
-                            json.dumps(
-                                f_entry(
+                            state = f_step(
+                                step=f_replay(
+                                    env_size=info["env"],
+                                    max_steps=info["max"],
                                     goal=entry["goal"],
                                     start=entry["start"],
                                     facing=entry["facing"],
-                                    image=image,
-                                    env_size=info["env"],
-                                    max_steps=info["max"],
                                     action=entry["action"],
-                                    state=f_step(
-                                        step=f_replay(
-                                            env_size=info["env"],
-                                            max_steps=info["max"],
-                                            goal=entry["goal"],
-                                            start=entry["start"],
-                                            facing=entry["facing"],
-                                            action=entry["action"],
-                                        ),
-                                        max_steps=max_steps,
-                                    ),
                                 ),
-                                sort_keys=True,
+                                max_steps=max_steps,
                             )
-                            + "\n"
-                        )
-    with open(os.path.join(data, "data.data"), "w") as f:
-        pass
+                            if state != choice:
+                                continue
 
-    torch.save(
-        {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
-    )
+                            f.write(
+                                json.dumps(
+                                    f_entry(
+                                        goal=entry["goal"],
+                                        start=entry["start"],
+                                        facing=entry["facing"],
+                                        image=image,
+                                        env_size=info["env"],
+                                        max_steps=info["max"],
+                                        action=entry["action"],
+                                        state=state,
+                                    ),
+                                    sort_keys=True,
+                                )
+                                + "\n"
+                            )
+        with open(os.path.join(data, "data.{choice}.data"), "w") as f:
+            pass
 
-    print(f"Save model: {os.path.join(data, 'model.pt')}")
+        torch.save(
+            {"info": info, "weight": model.state_dict()},
+            os.path.join(data, "model.{choice}.pt"),
+        )
+
+        print(f"Save model: {os.path.join(data, 'model.pt')}")
 
 
 def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
