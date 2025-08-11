@@ -333,6 +333,7 @@ def f_explore(
 
 
 def f_callback(
+    choice,
     info,
     data,
     interval,
@@ -351,18 +352,19 @@ def f_callback(
     # keep copy of max_version = 3
     max_version = 3
     for i in reversed(range(1, max_version)):
-        src = os.path.join(data, f"model_{i}.pt")
-        dst = os.path.join(data, f"model_{i+1}.pt")
+        src = os.path.join(data, f"model.{choice}.{i}.pt")
+        dst = os.path.join(data, f"model.{choice}.{i+1}.pt")
         if os.path.exists(src):
             shutil.move(src, dst)
 
     # model.pt => model_1.pt
-    shutil.move(os.path.join(data, "model.pt"), os.path.join(data, "model_1.pt"))
+    shutil.move(
+        os.path.join(data, f"model.{choice}.pt"),
+        os.path.join(data, f"model.{choice}.1.pt"),
+    )
 
     # save model
-    torch.save(
-        {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
-    )
+    torch.save(model.state_dict(), os.path.join(data, f"model.{choice}.pt"))
 
     progress._meta_index_ += interval
 
@@ -599,7 +601,7 @@ def run_spin_choice(choice, info, model, data):
         pass
 
     torch.save(
-        {"info": info, "weight": model.state_dict()},
+        model.state_dict(),
         os.path.join(data, f"model.{choice}.pt"),
     )
 
@@ -702,14 +704,18 @@ def run_spin(seed, data, image, max_steps):
     for choice in state_space:
         run_spin_choice(choice, info, model, data)
 
+    with open(os.path.join(data, "info.json"), "w") as f:
+        f.write(json.dumps(info, sort_keys=True))
+
     return
 
 
 def run_pretrain(choice, data, image, total, batch, reservoir, interval, lr, device):
-    info, weight = operator.itemgetter("info", "weight")(
-        torch.load(os.path.join(data, f"model.{choice}.pt"), map_location="cpu")
-    )
+    with open(os.path.join(data, "info.json"), "r") as f:
+        info = json.loads(f.read())
     print(f"Load info: {json.dumps(info, sort_keys=True)}")
+
+    weight = torch.load(os.path.join(data, f"model.{choice}.pt"), map_location="cpu")
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -809,6 +815,7 @@ def run_pretrain(choice, data, image, total, batch, reservoir, interval, lr, dev
         total=total,
         callback=functools.partial(
             f_callback,
+            choice=choice,
             info=info,
             data=data,
             interval=interval,
