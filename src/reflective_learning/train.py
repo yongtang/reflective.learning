@@ -214,6 +214,7 @@ def discover(
         model.eval()
     for model in finetune:
         model.to(device)
+        model.train()
 
     count = 0
 
