@@ -468,10 +468,10 @@ class PretrainDataset(torch.utils.data.IterableDataset):
         while True:
             if random.random() < 0.5:
                 selection = random.randint(0, self.essential - 1)
-                selection = f"seed_{choice}_{selection:08d}".encode()
+                selection = f"seed_{self.choice}_{selection:08d}".encode()
             else:
                 selection = random.randint(0, self.reservoir - 1)
-                selection = f"data_{choice}_{selection:08d}".encode()
+                selection = f"data_{self.choice}_{selection:08d}".encode()
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
             if selection:
