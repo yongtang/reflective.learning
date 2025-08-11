@@ -878,65 +878,6 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
-    with open(os.path.join(data, "stub.data"), "w") as f:
-        with tqdm(
-            total=total,
-            desc="Stub data",
-            dynamic_ncols=True,
-            unit="stub",
-            bar_format=bar_format,
-        ) as progress:
-            for index in range(total):
-                while True:
-                    goal = (
-                        random.randint(1, env_size - 2),
-                        random.randint(1, env_size - 2),
-                    )
-                    start = (
-                        random.randint(1, env_size - 2),
-                        random.randint(1, env_size - 2),
-                    )
-                    if goal != start:
-                        break
-                facing = random.choice(facing_space)
-
-                entry = f_explore(
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    image=image,
-                    env_size=env_size,
-                    max_steps=max_steps,
-                    vocab=vocab,
-                    encoder=encoder,
-                    model=finetune,
-                    device=device,
-                )
-                token = torch.tensor(
-                    [vocab[e] for e in entry["token"]],
-                    dtype=torch.long,
-                )
-                prefix = f_prefix(
-                    entry_text=entry["text"],
-                    entry_image=entry["image"],
-                    encoder=encoder,
-                    database=database,
-                    image=image,
-                )
-                entry = {
-                    "text": entry["text"],
-                    "image": entry["image"],
-                    "token": entry["token"],
-                    "state": entry["state"],
-                }
-                f.write(json.dumps(entry, sort_keys=True) + "\n")
-                with database.begin(write=True) as transaction:
-                    transaction.put(
-                        f"stub_{index:08d}".encode(),
-                        json.dumps(entry, sort_keys=True).encode(),
-                    )
-                progress.update(1)
-
     dataset = DiscoverDataset(
         database=database,
         start=0,
@@ -954,21 +895,87 @@ def run_discover(data, image, total, batch, epoch, lr, device):
 
     optimizer = torch.optim.Adam([p for m in finetune for p in m.parameters()], lr=lr)
 
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch,
-        collate_fn=next(iter(baseline)).collate,
-    )
-    discover(
-        baseline=baseline,
-        finetune=finetune,
-        loader=loader,
-        optimizer=optimizer,
-        total=total,
-        epoch=epoch,
-        callback=None,
-        device=device,
-    )
+    for e in range(epoch):
+        statistics = {state: 0 for state in state_space}
+        with open(os.path.join(data, "stub.data"), "w") as f:
+            with tqdm(
+                total=total,
+                desc=f"Stub epoch {e} data",
+                dynamic_ncols=True,
+                unit="stub",
+                bar_format=bar_format,
+            ) as progress:
+                for index in range(total):
+                    while True:
+                        goal = (
+                            random.randint(1, env_size - 2),
+                            random.randint(1, env_size - 2),
+                        )
+                        start = (
+                            random.randint(1, env_size - 2),
+                            random.randint(1, env_size - 2),
+                        )
+                        if goal != start:
+                            break
+                    facing = random.choice(facing_space)
+
+                    entry = f_explore(
+                        goal=goal,
+                        start=start,
+                        facing=facing,
+                        image=image,
+                        env_size=env_size,
+                        max_steps=max_steps,
+                        vocab=vocab,
+                        encoder=encoder,
+                        model=finetune,
+                        device=device,
+                    )
+                    token = torch.tensor(
+                        [vocab[e] for e in entry["token"]],
+                        dtype=torch.long,
+                    )
+                    prefix = f_prefix(
+                        entry_text=entry["text"],
+                        entry_image=entry["image"],
+                        encoder=encoder,
+                        database=database,
+                        image=image,
+                    )
+                    entry = {
+                        "text": entry["text"],
+                        "image": entry["image"],
+                        "token": entry["token"],
+                        "state": entry["state"],
+                    }
+                    f.write(json.dumps(entry, sort_keys=True) + "\n")
+                    with database.begin(write=True) as transaction:
+                        transaction.put(
+                            f"stub_{index:08d}".encode(),
+                            json.dumps(entry, sort_keys=True).encode(),
+                        )
+
+                    statistics[entry["state"]] += 1
+
+                    progress.update(1)
+        print(
+            "Statistics: [" + ", ".join(f"{k}:{d[k]}" for k in sorted(statistics)) + "]"
+        )
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch,
+            collate_fn=next(iter(baseline)).collate,
+        )
+        discover(
+            baseline=baseline,
+            finetune=finetune,
+            loader=loader,
+            optimizer=optimizer,
+            total=total,
+            epoch=epoch,
+            callback=None,
+            device=device,
+        )
 
     return
 
