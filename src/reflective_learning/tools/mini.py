@@ -539,7 +539,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 count += 1
 
 
-def run_spin_choice(choice, info, model, data):
+def run_spin_choice(choice, seed, data, total, info, model):
     with open(os.path.join(data, f"seed.{choice}.data"), "w") as f:
         with open(seed, "r") as g:
             with tqdm(
@@ -573,7 +573,7 @@ def run_spin_choice(choice, info, model, data):
                                 facing=entry["facing"],
                                 action=entry["action"],
                             ),
-                            max_steps=max_steps,
+                            max_steps=info["max"],
                         )
                         if state != choice:
                             continue
@@ -699,7 +699,9 @@ def run_spin(seed, data, image, max_steps):
     os.makedirs(data, exist_ok=True)
 
     for choice in state_space:
-        run_spin_choice(choice, info, model, data)
+        run_spin_choice(
+            choice=choice, seed=seed, data=data, total=total, info=info, model=model
+        )
 
     with open(os.path.join(data, "info.json"), "w") as f:
         f.write(json.dumps(info, sort_keys=True))
