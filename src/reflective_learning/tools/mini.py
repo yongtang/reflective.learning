@@ -21,6 +21,7 @@ from reflective_learning.inference import explore, sequence
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import discover, pretrain
 
+state_space = ["success", "failure"]
 action_space = [
     minigrid.core.actions.Actions.done,
     minigrid.core.actions.Actions.left,
@@ -456,8 +457,9 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, database, entry):
 
 
 class PretrainDataset(torch.utils.data.IterableDataset):
-    def __init__(self, database, essential, reservoir, datum_fn):
+    def __init__(self, choice, database, essential, reservoir, datum_fn):
         super().__init__()
+        self.choice = choice
         self.database = database
         self.essential = essential
         self.reservoir = reservoir
@@ -467,10 +469,10 @@ class PretrainDataset(torch.utils.data.IterableDataset):
         while True:
             if random.random() < 0.5:
                 selection = random.randint(0, self.essential - 1)
-                selection = f"seed_{selection:08d}".encode()
+                selection = f"seed_{choice}_{selection:08d}".encode()
             else:
                 selection = random.randint(0, self.reservoir - 1)
-                selection = f"data_{selection:08d}".encode()
+                selection = f"data_{choice}_{selection:08d}".encode()
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
             if selection:
@@ -536,6 +538,72 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 )
                 progress.update(1)
                 count += 1
+
+
+def run_spin_choice(choice, info, model, data):
+    with open(os.path.join(data, f"seed.{choice}.data"), "w") as f:
+        with open(seed, "r") as g:
+            with tqdm(
+                total=total,
+                desc=f"Seed {choice} entry",
+                dynamic_ncols=True,
+                bar_format=bar_format,
+                unit="seed",
+            ) as progress:
+
+                for line in g:
+                    if line.strip():
+                        progress.update(1)
+
+                        entry = json.loads(line)
+
+                        assert entry["env"] == info["env"], f"{entry} vs. {info}"
+                        assert (
+                            len(entry["action"]) <= info["max"]
+                        ), f"{entry} vs. {info}"
+                        assert all(
+                            e in info["vocab"].keys() for e in entry["action"]
+                        ), f"{entry} vs. {info}"
+
+                        state = f_step(
+                            step=f_replay(
+                                env_size=info["env"],
+                                max_steps=info["max"],
+                                goal=entry["goal"],
+                                start=entry["start"],
+                                facing=entry["facing"],
+                                action=entry["action"],
+                            ),
+                            max_steps=max_steps,
+                        )
+                        if state != choice:
+                            continue
+
+                        f.write(
+                            json.dumps(
+                                f_entry(
+                                    goal=entry["goal"],
+                                    start=entry["start"],
+                                    facing=entry["facing"],
+                                    image=image,
+                                    env_size=info["env"],
+                                    max_steps=info["max"],
+                                    action=entry["action"],
+                                    state=state,
+                                ),
+                                sort_keys=True,
+                            )
+                            + "\n"
+                        )
+    with open(os.path.join(data, f"data.{choice}.data"), "w") as f:
+        pass
+
+    torch.save(
+        {"info": info, "weight": model.state_dict()},
+        os.path.join(data, f"model.{choice}.pt"),
+    )
+
+    print(f"Save model: {os.path.join(data, 'model.pt')}")
 
 
 def run_spin(seed, data, image, max_steps):
@@ -605,7 +673,6 @@ def run_spin(seed, data, image, max_steps):
         "env": env_size,
         "max": max_steps,
         "vocab": {e.name: (action_space.index(e)) for e in action_space},
-        "state": {"success": 0, "failure": 1},
         "layer": {
             "d_model": 768,
             "nhead": 12,
@@ -632,76 +699,15 @@ def run_spin(seed, data, image, max_steps):
 
     os.makedirs(data, exist_ok=True)
 
-    for choice in info["env"]:
-        with open(os.path.join(data, f"seed.{choice}.data"), "w") as f:
-            with open(seed, "r") as g:
-                with tqdm(
-                    total=total,
-                    desc="Seed {choice} entry",
-                    dynamic_ncols=True,
-                    bar_format=bar_format,
-                    unit="seed",
-                ) as progress:
+    for choice in state_space:
+        run_spin_choice(choice, info, model, data)
 
-                    for line in g:
-                        if line.strip():
-                            progress.update(1)
-
-                            entry = json.loads(line)
-
-                            assert entry["env"] == info["env"], f"{entry} vs. {info}"
-                            assert (
-                                len(entry["action"]) <= info["max"]
-                            ), f"{entry} vs. {info}"
-                            assert all(
-                                e in info["vocab"].keys() for e in entry["action"]
-                            ), f"{entry} vs. {info}"
-
-                            state = f_step(
-                                step=f_replay(
-                                    env_size=info["env"],
-                                    max_steps=info["max"],
-                                    goal=entry["goal"],
-                                    start=entry["start"],
-                                    facing=entry["facing"],
-                                    action=entry["action"],
-                                ),
-                                max_steps=max_steps,
-                            )
-                            if state != choice:
-                                continue
-
-                            f.write(
-                                json.dumps(
-                                    f_entry(
-                                        goal=entry["goal"],
-                                        start=entry["start"],
-                                        facing=entry["facing"],
-                                        image=image,
-                                        env_size=info["env"],
-                                        max_steps=info["max"],
-                                        action=entry["action"],
-                                        state=state,
-                                    ),
-                                    sort_keys=True,
-                                )
-                                + "\n"
-                            )
-        with open(os.path.join(data, "data.{choice}.data"), "w") as f:
-            pass
-
-        torch.save(
-            {"info": info, "weight": model.state_dict()},
-            os.path.join(data, "model.{choice}.pt"),
-        )
-
-        print(f"Save model: {os.path.join(data, 'model.pt')}")
+    return
 
 
-def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
-
+def run_pretrain(choice, data, image, total, batch, reservoir, interval, lr, device):
     info, weight = operator.itemgetter("info", "weight")(
-        torch.load(os.path.join(data, "model.pt"), map_location="cpu")
+        torch.load(os.path.join(data, f"model.{choice}.pt"), map_location="cpu")
     )
     print(f"Load info: {json.dumps(info, sort_keys=True)}")
 
@@ -711,7 +717,7 @@ def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
 
     model.load_state_dict(weight)
     model.to(device)
-    print(f"Load model: {os.path.join(data, 'model.pt')}")
+    print(f"Load model: {os.path.join(data, 'model.{choice}.pt')}")
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
@@ -721,24 +727,22 @@ def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
     with database.begin(write=True) as transaction:
         with tqdm(
             total=transaction.stat()["entries"],
-            desc="Lmdb check",
+            desc=f"Lmdb {choice} check",
             unit="key",
             dynamic_ncols=True,
         ) as progress:
             for key, _ in transaction.cursor():
                 progress.update(1)
-                if key.startswith(f"seed_".encode()):
+                if key.startswith(f"seed_{choice}_".encode()):
                     transaction.delete(key)
-                if key.startswith(f"data_".encode()):
-                    transaction.delete(key)
-                if key.startswith(f"info_".encode()):
+                if key.startswith(f"data_{choice}_".encode()):
                     transaction.delete(key)
 
         count = 0
-        with open(os.path.join(data, "seed.data"), "r") as f:
+        with open(os.path.join(data, f"seed.{choice}.data"), "r") as f:
             with tqdm(
-                total=os.path.getsize(os.path.join(data, "seed.data")),
-                desc="Seed index",
+                total=os.path.getsize(os.path.join(data, f"seed.{choice}.data")),
+                desc=f"Seed {choice} index",
                 unit="B",
                 unit_scale=True,
                 dynamic_ncols=True,
@@ -750,16 +754,16 @@ def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
                         data_entry = json.dumps(entry, sort_keys=True)
                         index = count
                         transaction.put(
-                            f"seed_{index:08d}".encode(), data_entry.encode()
+                            f"seed_{choice}_{index:08d}".encode(), data_entry.encode()
                         )
                         count = count + 1
         essential = count
 
         count = 0
-        with open(os.path.join(data, "data.data"), "r") as f:
+        with open(os.path.join(data, f"data.{choice}.data"), "r") as f:
             with tqdm(
-                total=os.path.getsize(os.path.join(data, "data.data")),
-                desc="Data index",
+                total=os.path.getsize(os.path.join(data, f"data.{choice}.data")),
+                desc=f"Data {choice} index",
                 unit="B",
                 unit_scale=True,
                 dynamic_ncols=True,
@@ -771,21 +775,12 @@ def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
                         data_entry = json.dumps(entry, sort_keys=True)
                         index = count % reservoir
                         transaction.put(
-                            f"data_{count:08d}".encode(), data_entry.encode()
+                            f"data_{choice}_{count:08d}".encode(), data_entry.encode()
                         )
                         count = (count + 1) % reservoir
-        transaction.put(
-            f"info_meta".encode(),
-            json.dumps(
-                {
-                    "essential": essential,
-                    "reservoir": reservoir,
-                },
-                sort_keys=True,
-            ).encode(),
-        )
 
     dataset = PretrainDataset(
+        choice=choice,
         database=database,
         essential=essential,
         reservoir=reservoir,
@@ -1033,6 +1028,7 @@ def main():
 
     # ---- pretrain mode ----
     pretrain_parser = subparsers.add_parser("pretrain", help="Pretrain mode")
+    pretrain_parser.add_argument("--choice", required=True)
     pretrain_parser.add_argument("--data", required=True)
     pretrain_parser.add_argument("--image", required=True)
     pretrain_parser.add_argument("--total", type=int, required=True)
@@ -1082,6 +1078,7 @@ def main():
 
     elif args.mode == "pretrain":
         run_pretrain(
+            choice=args.choice,
             data=args.data,
             image=args.image,
             total=args.total,
