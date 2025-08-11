@@ -987,7 +987,7 @@ def run_finetune(data, image, model, device):
 
     weight = torch.load(os.path.join(data, f"model.{choice}.pt"), map_location="cpu")
 
-    torch.save({"info": info, "weight": model.state_dict()}, model)
+    torch.save({"info": info, "weight": weight}, model)
 
 
 def run_play(goal, start, facing, model, device):
