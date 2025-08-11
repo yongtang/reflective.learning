@@ -1,7 +1,6 @@
 import argparse
 import functools
 import io
-import itertools
 import json
 import operator
 import os
@@ -953,7 +952,7 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         ),
     )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam([p for m in finetune for p in m.parameters()], lr=lr)
 
     loader = torch.utils.data.DataLoader(
         dataset,
