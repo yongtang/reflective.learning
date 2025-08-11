@@ -166,49 +166,55 @@ class ReflectiveCore(nn.Module):
         # Average over valid tokens
         return loss_flat.sum() / valid.sum().clamp(min=1).float()
 
-    def prob(self, embed, mask, token, index):
+    def prob(self, mask, embed, token, index):
         """
-        Compute sequence log-probabilities log P(y | x) in batch, leveraging collate() outputs.
+        Compute length-normalized sequence log-probabilities log P(y | x) in batch,
+        leveraging collate() outputs.
 
         Args:
-            embed: [B, L, D] from collate()
             mask:  [B, L]    from collate()
+            embed: [B, L, D] from collate()
             token: [B, T]    from collate() (right-padded)
             index: [B]       from collate() (position of token[0] in input)
 
         Returns:
-            logprob:  [B] total log-probability of each sequence
+            logprob:  [B] length-normalized log-probability of each sequence
         """
         # Run the transformer to get logits at every position
-        logit = self.call(mask=mask, embed=embed)  # [B,L,V]
+        logit = self.call(mask=mask, embed=embed)  # [B, L, V]
         B, L, V = logit.shape
         T = token.size(1)
 
-        # Compute, for each token in the sequence, which logit position predicts it
-        I = torch.arange(T, device=mask.device).view(1, T)  # offsets [0, 1, 2, ...]
+        # Offsets for token positions: [0, 1, 2, ...]
+        I = torch.arange(T, device=mask.device).view(1, T)  # [1, T]
         start = (index - 1).view(B, 1)  # position before the first token
-        position = start + I  # [B,T] positions in logits
+        position = start + I  # [B, T] positions in logits
 
-        # Mark which positions are valid (inside sequence length and not padding)
+        # Mark valid positions: inside sequence length and not padding
         valid = (
             (position >= 0)
             & ((position + 1) < L)
             & mask.gather(1, (position + 1).clamp_(0, L - 1))
         )
-        position = position.clamp(0, L - 1)  # keep indices in range for gather
+        position = position.clamp(0, L - 1)  # ensure positions are in range
 
-        # Get logits for each reference token's prediction step and turn into log-prob
-        step = logit.gather(1, position.unsqueeze(-1).expand(B, T, V))  # [B,T,V]
-        logp = F.log_softmax(step, dim=-1)  # [B,T,V]
+        # Gather logits for each token prediction step
+        step = logit.gather(1, position.unsqueeze(-1).expand(B, T, V))  # [B, T, V]
 
-        # Keep only the log-prob assigned to each reference token
-        logp = logp.gather(-1, token.unsqueeze(-1)).squeeze(-1)  # [B,T]
+        # Convert to log-probabilities
+        logp = F.log_softmax(step, dim=-1)  # [B, T, V]
 
-        # Zero out positions that are not valid
+        # Keep only the log-prob assigned to the reference token
+        logp = logp.gather(-1, token.unsqueeze(-1)).squeeze(-1)  # [B, T]
+
+        # Zero-out invalid positions
         logp = logp * valid.float()
 
-        # Sum the token log-probs to get total sequence log-prob
-        return logp.sum(dim=1)  # [B]
+        # Compute sequence lengths (number of valid tokens)
+        lengths = token.ne(0).sum(dim=1).clamp(min=1)  # [B]
+
+        # Length-normalized total log-probability per sequence
+        return logp.sum(dim=1) / lengths  # [B]
 
     def collate(self, batch):
         """
