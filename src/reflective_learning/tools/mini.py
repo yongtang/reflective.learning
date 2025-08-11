@@ -540,6 +540,13 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
 
 
 def run_spin_choice(choice, seed, data, total, info, model):
+    total_width = len(str(total))
+    bar_format = (
+        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
+        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
+        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+    )
+
     with open(os.path.join(data, f"seed.{choice}.data"), "w") as f:
         with open(seed, "r") as g:
             with tqdm(
