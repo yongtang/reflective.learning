@@ -107,7 +107,8 @@ def discover(
     Trains the discover model using a streaming loader
 
     Args:
-        model: The ReflectiveCore model to train.
+        baseline: The ReflectiveCore baseline models.
+        finetune: The ReflectiveCore finetune models.
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
         total: Total number of training samples to process.
