@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 import torch
 from tqdm import tqdm
@@ -95,8 +95,8 @@ def pretrain(
 
 
 def discover(
-    base: ReflectiveCore,
-    model: ReflectiveCore,
+    baseline: List[ReflectiveCore],
+    finetune: List[ReflectiveCore],
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     total: int,
@@ -107,7 +107,6 @@ def discover(
     Trains the discover model using a streaming loader
 
     Args:
-        base: The ReflectiveCore model of base.
         model: The ReflectiveCore model to train.
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.

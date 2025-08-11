@@ -850,7 +850,8 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         print(f"Load model: " + os.path.join(data, "model.{choice}.pt"))
         return model
 
-    model = tuple(f_load(choice) for choice in state_space)
+    baseline = list(f_load(choice) for choice in state_space)
+    finetune = list(f_load(choice) for choice in state_space)
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
@@ -937,8 +938,6 @@ def run_discover(data, image, total, batch, epoch, lr, device):
                     )
                 progress.update(1)
 
-    assert False
-
     dataset = DiscoverDataset(
         database=database,
         start=0,
@@ -946,7 +945,7 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         datum_fn=functools.partial(
             f_datum,
             vocab_fn=lambda e: info["vocab"][e],
-            state_fn=lambda e: info["state"][e],
+            state_fn=lambda e: state_space.index(e),
             max_steps=info["max"],
             image=image,
             encoder=encoder,
@@ -956,22 +955,20 @@ def run_discover(data, image, total, batch, epoch, lr, device):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    for e in range(epoch):
-
-        loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=batch,
-            collate_fn=model.collate,
-        )
-        discover(
-            base=base,
-            model=model,
-            loader=loader,
-            optimizer=optimizer,
-            total=total,
-            epoch=e,
-            device=device,
-        )
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch,
+        collate_fn=next(iter(baseline)).collate,
+    )
+    discover(
+        baseline=baseline,
+        finetune=finetune,
+        loader=loader,
+        optimizer=optimizer,
+        total=total,
+        epoch=e,
+        device=device,
+    )
 
     return
 
