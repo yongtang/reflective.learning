@@ -731,7 +731,7 @@ def run_pretrain(choice, data, image, total, batch, reservoir, interval, lr, dev
 
     model.load_state_dict(weight)
     model.to(device)
-    print(f"Load model: {os.path.join(data, 'model.{choice}.pt')}")
+    print(f"Load model: " + os.path.join(data, "model.{choice}.pt"))
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
@@ -847,7 +847,7 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         model = f_model(info).to(device)
         model.load_state_dict(weight)
         model.to(device)
-        print(f"Load model: {os.path.join(data, 'model.{choice}.pt')}")
+        print(f"Load model: " + os.path.join(data, "model.{choice}.pt"))
         return model
 
     model = tuple(f_load(choice) for choice in state_space)

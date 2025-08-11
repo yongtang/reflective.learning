@@ -64,8 +64,6 @@ def explore(
             logits = torch.stack(list(e.forward(token, prefix) for e in model)).mean(
                 dim=0
             )  # [V]
-
-            logits = model.forward(token, prefix)  # [V]
             probs = torch.softmax(logits, dim=0)  # [V]
             next_token = torch.multinomial(probs, num_samples=1)  # [1]
             token = torch.cat([token, next_token], dim=0)  # [T+1]
