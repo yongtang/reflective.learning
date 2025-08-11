@@ -38,7 +38,7 @@ def sequence(
 
 def explore(
     model,
-    prefixes: torch.Tensor,  # [C, D]
+    prefix: torch.Tensor,  # [C, D]
     maximum: int,
     device: torch.device,
 ) -> torch.Tensor:
@@ -54,19 +54,18 @@ def explore(
     Returns:
         Tensor: [T] of generated token indices.
     """
-    model.eval()
+    for e in model:
+        e.eval()
     with torch.no_grad():
-        prefixes = list(
-            prefix.to(dtype=torch.float32, device=device) for prefix in prefixes
-        )
+        prefix = prefix.to(dtype=torch.float32, device=device)
         token = torch.empty([0], dtype=torch.long, device=device)  # [T]
 
         for _ in range(maximum):
-            logits = torch.stack(
-                list(model.forward(token, prefix) for prefix in prefixes)
-            ).mean(
+            logits = torch.stack(list(e.forward(token, prefix) for e in model)).mean(
                 dim=0
             )  # [V]
+
+            logits = model.forward(token, prefix)  # [V]
             probs = torch.softmax(logits, dim=0)  # [V]
             next_token = torch.multinomial(probs, num_samples=1)  # [1]
             token = torch.cat([token, next_token], dim=0)  # [T+1]

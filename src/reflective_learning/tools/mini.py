@@ -267,7 +267,6 @@ def f_explore(
     goal,
     start,
     facing,
-    state,
     image,
     env_size,
     max_steps,
@@ -276,33 +275,30 @@ def f_explore(
     model,
     device,
 ):
-    prefixes = [
-        f_prefix(
-            entry_text=f_text(
-                env_size=env_size,
-                max_steps=max_steps,
-                goal=goal,
-                start=start,
-                facing=facing,
-            ),
-            entry_image=f_image(
-                env_size=env_size,
-                max_steps=max_steps,
-                goal=goal,
-                start=start,
-                facing=facing,
-                image=image,
-            ),
-            encoder=encoder,
-            database=None,
+    prefix = f_prefix(
+        entry_text=f_text(
+            env_size=env_size,
+            max_steps=max_steps,
+            goal=goal,
+            start=start,
+            facing=facing,
+        ),
+        entry_image=f_image(
+            env_size=env_size,
+            max_steps=max_steps,
+            goal=goal,
+            start=start,
+            facing=facing,
             image=image,
-        )
-        for e in state
-    ]
+        ),
+        encoder=encoder,
+        database=None,
+        image=image,
+    )
 
     token = explore(
         model=model,
-        prefixes=prefixes,
+        prefix=prefix,
         maximum=max_steps,
         device=device,
     )
@@ -882,8 +878,6 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
-    assert False
-
     with open(os.path.join(data, "stub.data"), "w") as f:
         with tqdm(
             total=total,
@@ -910,7 +904,6 @@ def run_discover(data, image, total, batch, epoch, lr, device):
                     goal=goal,
                     start=start,
                     facing=facing,
-                    state=info["state"].values(),
                     image=image,
                     env_size=env_size,
                     max_steps=max_steps,
@@ -943,6 +936,8 @@ def run_discover(data, image, total, batch, epoch, lr, device):
                         json.dumps(entry, sort_keys=True).encode(),
                     )
                 progress.update(1)
+
+    assert False
 
     dataset = DiscoverDataset(
         database=database,
