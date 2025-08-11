@@ -979,7 +979,13 @@ def run_discover(data, image, total, batch, epoch, lr, device):
 
 
 def run_finetune(data, image, model, device):
-    assert False
+    with open(os.path.join(data, "info.json"), "r") as f:
+        info = json.loads(f.read())
+    print(f"Load info: {json.dumps(info, sort_keys=True)}")
+
+    weight = torch.load(os.path.join(data, f"model.{choice}.pt"), map_location="cpu")
+
+    torch.save({"info": info, "weight": model.state_dict()}, model)
 
 
 def run_play(goal, start, facing, model, device):
@@ -1132,7 +1138,7 @@ def main():
         )
 
     elif args.mode == "finetune":
-        run_discover(
+        run_finetune(
             data=args.data,
             image=args.image,
             model=args.model,
