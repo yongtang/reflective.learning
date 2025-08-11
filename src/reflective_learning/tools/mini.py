@@ -135,9 +135,6 @@ def f_model(info):
     assert vocab_indices == list(range(len(vocab_indices))), f"{info['vocab']}"
     vocab_size = len(vocab_indices)
 
-    state_indices = sorted(info["state"].values())
-    assert state_indices == list(range(len(state_indices))), f"{info['state']}"
-
     max_seq_len = info["max"]
     max_prefix_len = 512
 
