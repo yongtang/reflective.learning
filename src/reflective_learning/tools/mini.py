@@ -798,14 +798,14 @@ def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
             database=database,
         ),
     )
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch,
         collate_fn=model.collate,
     )
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
     pretrain(
         model=model,
         loader=loader,
@@ -940,23 +940,25 @@ def run_discover(data, image, total, batch, epoch, lr, device):
             database=database,
         ),
     )
-    loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=batch,
-        collate_fn=model.collate,
-    )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    discover(
-        base=base,
-        model=model,
-        loader=loader,
-        optimizer=optimizer,
-        total=total,
-        epoch=epoch,
-        device=device,
-    )
+    for e in range(epoch):
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch,
+            collate_fn=model.collate,
+        )
+        discover(
+            base=base,
+            model=model,
+            loader=loader,
+            optimizer=optimizer,
+            total=total,
+            epoch=e,
+            device=device,
+        )
 
     return
 

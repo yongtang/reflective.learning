@@ -127,7 +127,6 @@ def discover(
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-
     count = 0
 
     with tqdm(
@@ -183,5 +182,3 @@ def discover(
 
             if count >= total:
                 break
-
-
