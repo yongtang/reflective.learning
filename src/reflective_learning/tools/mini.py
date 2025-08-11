@@ -483,7 +483,7 @@ class DiscoverDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         while True:
-            selection = random.randint(0, self.essential - 1)
+            selection = random.randint(0, final - 1)
             selection = f"stub_{selection:08d}".encode()
             with self.database.begin() as transaction:
                 selection = transaction.get(selection)
