@@ -1074,7 +1074,6 @@ def main():
     discover_parser.add_argument("--total", type=int, required=True)
     discover_parser.add_argument("--batch", type=int, required=True)
     discover_parser.add_argument("--epoch", type=int, required=True)
-    discover_parser.add_argument("--interval", type=int, required=True)
     discover_parser.add_argument("--lr", type=float, required=True)
     discover_parser.add_argument("--device")
 
@@ -1132,7 +1131,6 @@ def main():
             total=args.total,
             batch=args.batch,
             epoch=args.epoch,
-            interval=args.interval,
             lr=args.lr,
             device=args.device,
         )
