@@ -604,7 +604,7 @@ def run_spin_choice(choice, seed, data, image, total, info, model):
         os.path.join(data, f"model.{choice}.pt"),
     )
 
-    print(f"Save model: {os.path.join(data, 'model.pt')}")
+    print(f"Save model: " + os.path.join(data, f"model.{choice}.pt"))
 
 
 def run_spin(seed, data, image, max_steps):
