@@ -966,7 +966,7 @@ def run_discover(data, image, total, batch, epoch, lr, device):
         loader=loader,
         optimizer=optimizer,
         total=total,
-        epoch=e,
+        epoch=epoch,
         device=device,
     )
 
