@@ -539,7 +539,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 count += 1
 
 
-def run_spin_choice(choice, seed, data, total, info, model):
+def run_spin_choice(choice, seed, data, image, total, info, model):
     total_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
@@ -707,7 +707,13 @@ def run_spin(seed, data, image, max_steps):
 
     for choice in state_space:
         run_spin_choice(
-            choice=choice, seed=seed, data=data, total=total, info=info, model=model
+            choice=choice,
+            seed=seed,
+            data=data,
+            image=image,
+            total=total,
+            info=info,
+            model=model,
         )
 
     with open(os.path.join(data, "info.json"), "w") as f:
