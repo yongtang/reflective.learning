@@ -1049,6 +1049,13 @@ def main():
     discover_parser.add_argument("--lr", type=float, required=True)
     discover_parser.add_argument("--device")
 
+    # ---- finetune mode ----
+    finetune_parser = subparsers.add_parser("finetune", help="Finetune mode")
+    finetune_parser.add_argument("--data", required=True)
+    finetune_parser.add_argument("--image", required=True)
+    finetune_parser.add_argument("--model", required=True)
+    finetune_parser.add_argument("--device")
+
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Perform mode")
     play_parser.add_argument("--model", required=True)
@@ -1098,6 +1105,14 @@ def main():
             epoch=args.epoch,
             interval=args.interval,
             lr=args.lr,
+            device=args.device,
+        )
+
+    elif args.mode == "finetune":
+        run_discover(
+            data=args.data,
+            image=args.image,
+            model=args.model,
             device=args.device,
         )
 
