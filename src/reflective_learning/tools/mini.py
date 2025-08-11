@@ -515,6 +515,11 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 iteration += 1
                 steps = random.randint(1, max_steps)
                 goal, start, facing, action = f_observation(env_size, steps=steps)
+                if count % len(state_space) != 0:
+                    goal = (
+                        random.randint(1, env_size - 2),
+                        random.randint(1, env_size - 2),
+                    )
 
                 if list(goal) == list(start):
                     continue  # skip invalid seed
