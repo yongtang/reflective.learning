@@ -335,7 +335,7 @@ def f_explore(
     )
 
 
-def f_callback_pretrain(
+def f_callback(
     info,
     data,
     interval,
@@ -366,30 +366,6 @@ def f_callback_pretrain(
     torch.save(
         {"info": info, "weight": model.state_dict()}, os.path.join(data, "model.pt")
     )
-
-    progress._meta_index_ += interval
-
-    if progress.n == progress.total:
-        return
-
-    return
-
-
-def f_callback_discover(
-    info,
-    data,
-    interval,
-    model,
-    progress,
-    device,
-):
-    if not hasattr(progress, "_meta_index_"):
-        progress._meta_index_ = 0
-
-    if not (
-        progress.n > progress._meta_index_ + interval or progress.n == progress.total
-    ):
-        return
 
     progress._meta_index_ += interval
 
@@ -836,7 +812,7 @@ def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
         optimizer=optimizer,
         total=total,
         callback=functools.partial(
-            f_callback_pretrain,
+            f_callback,
             info=info,
             data=data,
             interval=interval,
@@ -845,7 +821,7 @@ def run_pretrain(data, image, total, batch, reservoir, interval, lr, device):
     )
 
 
-def run_discover(data, image, total, batch, epoch, interval, lr, device):
+def run_discover(data, image, total, batch, epoch, lr, device):
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(os.path.join(data, "model.pt"), map_location="cpu")
@@ -979,12 +955,6 @@ def run_discover(data, image, total, batch, epoch, interval, lr, device):
         optimizer=optimizer,
         total=total,
         epoch=epoch,
-        callback=functools.partial(
-            f_callback_discover,
-            info=info,
-            data=data,
-            interval=interval,
-        ),
         device=device,
     )
 

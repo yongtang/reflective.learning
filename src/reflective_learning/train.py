@@ -101,7 +101,6 @@ def discover(
     optimizer: torch.optim.Optimizer,
     total: int,
     epoch: int,
-    callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
     device: Optional[torch.device] = None,
 ):
     pass
