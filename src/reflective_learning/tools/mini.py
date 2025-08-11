@@ -787,7 +787,7 @@ def run_pretrain(choice, data, image, total, batch, reservoir, interval, lr, dev
         datum_fn=functools.partial(
             f_datum,
             vocab_fn=lambda e: info["vocab"][e],
-            state_fn=lambda e: info["state"][e],
+            state_fn=lambda e: state_space.index(e),
             max_steps=info["max"],
             image=image,
             encoder=encoder,
