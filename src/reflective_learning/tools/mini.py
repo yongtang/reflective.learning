@@ -991,6 +991,7 @@ def run_finetune(data, image, model, device):
 
 
 def run_play(goal, start, facing, model, device):
+    state = state_space[0]
 
     info, weight = operator.itemgetter("info", "weight")(
         torch.load(model, map_location="cpu")
@@ -1009,7 +1010,6 @@ def run_play(goal, start, facing, model, device):
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
-    state = next((k for k, v in info["state"].items() if v == 0))
     with tempfile.TemporaryDirectory() as image:
         entry = f_sequence(
             goal=goal,
