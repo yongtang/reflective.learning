@@ -959,7 +959,10 @@ def run_discover(data, image, total, batch, epoch, lr, device):
 
                     progress.update(1)
         print(
-            "Statistics: [" + ", ".join(f"{k}:{d[k]}" for k in sorted(statistics)) + "]"
+            "Statistics: "
+            + "["
+            + ", ".join(f"{k}:{statistics[k]}" for k in sorted(statistics))
+            + "]"
         )
         loader = torch.utils.data.DataLoader(
             dataset,
