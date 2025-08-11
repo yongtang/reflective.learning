@@ -244,7 +244,7 @@ def discover(
                 mask=mask,
                 embed=embed,
                 token=token_label,
-                state=state,
+                state=state_label,
                 index=index,
                 device=device,
             )
