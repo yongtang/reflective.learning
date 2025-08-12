@@ -84,7 +84,7 @@ def pretrain(
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix_str(
-                f"loss={loss_value:{loss_width}.2e}  samples={count:{sample_width}d}"
+                f"loss={loss_value:{loss_width}.5e}  samples={count:{sample_width}d}"
             )
 
             if callback:
