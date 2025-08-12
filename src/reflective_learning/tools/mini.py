@@ -739,8 +739,8 @@ def run_pretrain(choice, data, image, total, batch, reservoir, interval, lr, dev
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    # 4GB = 1<<32
-    database = lmdb.open(data, map_size=1 << 32, readonly=False, create=True)
+    # 16GB = (1<<34)
+    database = lmdb.open(data, map_size=1 << 34, readonly=False, create=True)
 
     with database.begin(write=True) as transaction:
         with tqdm(
@@ -861,8 +861,8 @@ def run_discover(data, image, total, batch, epoch, lr, device):
 
     env_size, max_steps, vocab = info["env"], info["max"], info["vocab"]
 
-    # 4GB = 1<<32
-    database = lmdb.open(data, map_size=1 << 32, readonly=False, create=True)
+    # 16GB = 1<<34
+    database = lmdb.open(data, map_size=1 << 34, readonly=False, create=True)
 
     with database.begin(write=True) as transaction:
         with tqdm(
