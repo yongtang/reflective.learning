@@ -122,56 +122,32 @@ class ReflectiveCore(nn.Module):
         mask: torch.Tensor,  # [B, L] boolean mask for valid positions in logits
     ) -> torch.Tensor:
         """
-        Computes cross-entropy loss for next-token prediction, with per-state weighting.
-
-        Args:
-            logit: [B, L, V] predicted logits for prefix + token.
-                   Each position logit[b, t] predicts token[b, t + 1].
-            token: [B, T] ground truth token indices (shifted right vs logits).
-            state: [B] ground truth state per example.
-            weight: [S] weight per state (e.g. success=1.0, failure=0.1)
-            index: [B] index where token sequence starts in logits (i.e. position of token[0]).
-            mask:  [B, L] boolean mask for valid positions in logits.
-
-        Returns:
-            Scalar loss (cross entropy), averaged over valid tokens and weighted by state.
+        Computes cross-entropy loss for next-token prediction,
+        without per-state weighting.
         """
         B = logit.size(0)  # batch size
 
         total_loss = 0.0
-        total_weight = 0.0
+        total_count = 0.0
 
         for i in range(B):
-            # Index[i] is the position of token[0] in the sequence.
-            # The model predicts token[0] from position index[i] - 1
-            start = index[i].item() - 1  # Position in logits that predicts token[0]
+            start = index[i].item() - 1  # predicts token[0] from this position
 
-            mask_i = mask[i]  # [L], mask for this sample
+            mask_i = mask[i]  # [L]
+            count_i = (mask_i[start + 1 :]).sum().item()  # valid tokens to score
 
-            # Count how many valid tokens are predicted starting from start+1 to end of sequence
-            count_i = (
-                (mask_i[start + 1 :]).sum().item()
-            )  # how many predicted tokens to score
-
-            # Slice predicted logits from model output for this example
-            # These predict token[0] ... token[count_i - 1]
+            # Slice predictions and targets
             logit_i = logit[i, start : start + count_i]  # [count_i, V]
-
-            # Corresponding ground truth tokens
             token_target = token[i, :count_i]  # [count_i]
 
-            # Get scalar weight for this example based on its state
-            state_weight = weight[state[i]]  # scalar
+            # Sum loss over valid tokens
+            loss_i = F.cross_entropy(logit_i, token_target, reduction="sum")
 
-            # Compute cross entropy loss over valid predicted tokens
-            loss_i = F.cross_entropy(logit_i, token_target, reduction="sum")  # scalar
+            total_loss += loss_i
+            total_count += count_i
 
-            # Weight loss by state and accumulate
-            total_loss += loss_i * state_weight
-            total_weight += count_i * state_weight
-
-        # Return average loss per valid token, weighted by state
-        return total_loss / total_weight
+        # Average over valid tokens
+        return total_loss / total_count
 
     def collate(self, batch):
         """
