@@ -96,8 +96,23 @@ def pretrain(
 
 def dpo(baseline, finetune, mask, embed, token, state, index, device):
     """
-    Sequence-level loss (length-normalized) that always prefers the finetune model
-    over the baseline model on the same sequence.
+    Sequence-level loss (length-normalized) with no favoritism.
+    For each labeled state s in the batch, we compare finetune[s] against baseline[s]
+    on the SAME sequences belonging to that state, then average over the batch.
+
+    Notation (ASCII):
+        For each sequence b with label s:
+            logp_fine[b] = log p_theta_s(y_b | x_b)   # length-normalized seq log-prob
+            logp_base[b] = log p_phi_s(y_b | x_b)
+            margin[b]    = logp_fine[b] - logp_base[b]
+
+        Stable logistic loss (tau = 1):
+            loss = mean_b softplus( -margin[b] )
+                 = mean_b log( 1 + exp( -margin[b] ) )
+
+        Intuition:
+            Encourages finetune[s] to assign higher sequence probability than
+            its own frozen baseline on the same data.
 
     Args:
         baseline: list of models, one per state (frozen reference models)
@@ -111,15 +126,6 @@ def dpo(baseline, finetune, mask, embed, token, state, index, device):
 
     Returns:
         Scalar tensor loss
-
-    Equation (ASCII form):
-        margin[b] = logp_finetune[b] - logp_baseline[b]
-        loss      = mean( log( 1 + exp( -margin[b] ) ) )
-
-        This is equivalent to:
-            loss = mean( log( 1 + exp( -(logp_finetune - logp_baseline) ) ) )
-        which encourages logp_finetune > logp_baseline.
-
     Example:
         Suppose for one sequence:
             logp_finetune = -5.0   # finetune assigns prob = exp(-5)
@@ -133,7 +139,7 @@ def dpo(baseline, finetune, mask, embed, token, state, index, device):
         A larger margin (finetune better) → smaller loss.
         If margin were negative (baseline better), loss would be larger.
     """
-    # Move inputs to the correct device
+    # Move inputs to the correct device (unchanged)
     mask = mask.to(device)
     embed = embed.to(device)
     token = token.to(device)
@@ -141,16 +147,16 @@ def dpo(baseline, finetune, mask, embed, token, state, index, device):
     index = index.to(device)
 
     B = embed.size(0)
-    num_states = len(finetune)
+    M = len(finetune)  # number of models/states
 
-    # Preallocate per-sequence log-prob tensors
+    # Per-sequence log-prob tensors (batch order)
     llr_finetune = torch.empty(B, device=device)
     llr_baseline = torch.empty(B, device=device)
 
-    # Precompute indices for each state
-    state_indices = [(state == s).nonzero(as_tuple=True)[0] for s in range(num_states)]
+    # Precompute indices for each state (unchanged batching semantics)
+    state_indices = [(state == s).nonzero(as_tuple=True)[0] for s in range(M)]
 
-    # Loop per state, run models only for that state's subset
+    # Loop per state; run models only for that state's subset (unchanged)
     for s, idx in enumerate(state_indices):
         if idx.numel() == 0:
             continue  # no sequences for this state in this batch
@@ -162,7 +168,10 @@ def dpo(baseline, finetune, mask, embed, token, state, index, device):
 
         # Each model's prob() returns length-normalized sequence log-prob
         logp_finetune = finetune[s].prob(mask_s, embed_s, token_s, index_s)
-        logp_baseline = baseline[s].prob(mask_s, embed_s, token_s, index_s)
+
+        # Freeze baseline path for stability (no gradients, smaller graph)
+        with torch.no_grad():
+            logp_baseline = baseline[s].prob(mask_s, embed_s, token_s, index_s)
 
         # Scatter results back into batch order
         llr_finetune[idx] = logp_finetune
@@ -171,8 +180,8 @@ def dpo(baseline, finetune, mask, embed, token, state, index, device):
     # Margin: how much finetune is better than baseline
     margin = llr_finetune - llr_baseline
 
-    # Logistic loss (tau = 1): prefers margin to be large and positive
-    loss = torch.log1p(torch.exp(-margin)).mean()
+    # Numerically stable logistic loss (prefers margin to be large and positive)
+    loss = torch.nn.functional.softplus(-margin).mean()
     return loss
 
 
