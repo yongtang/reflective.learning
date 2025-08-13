@@ -183,21 +183,27 @@ def discover(
     optimizer: torch.optim.Optimizer,
     total: int,
     epoch: int,
-    callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
+    callback: Callable[[List[ReflectiveCore], tqdm, torch.device], None],
     device: Optional[torch.device] = None,
 ):
     """
-    Trains the discover model using a streaming loader
+    Trains the discover model using a streaming loader.
 
-    Args:
-        baseline: The ReflectiveCore baseline models.
-        finetune: The ReflectiveCore finetune models.
-        loader: A torch DataLoader yielding training batches.
-        optimizer: Optimizer for updating model parameters.
-        total: Total number of training samples to process.
-        epoch: Total number of training epoch rounds to process.
-        callback: A function called periodically during training.
-        device: Optional device override (defaults to CUDA if available).
+    Objective recap (ASCII):
+        For each labeled sequence b with state s:
+            margin[b] = log p_theta_s(y_b|x_b) - log p_phi_s(y_b|x_b)
+            loss      = mean_b softplus( -margin[b] )
+
+        => Pushes each finetune[s] to beat its OWN baseline on its OWN data,
+           with the batching/labeling you already have.
+
+    Numerical stability we actually use here:
+        - Baseline prob is computed under no_grad() inside dpo() (frozen).
+        - Non-finite guard: skip updates if loss is NaN/Inf.
+        - Gradient clipping:
+              Let g be the concatenated gradient and τ the threshold (e.g., 1.0).
+              g_clipped = g * min(1, τ / ||g||_2)
+              Ensures ||g_clipped||_2 ≤ τ, avoiding rare exploding updates.
     """
 
     loss_width = 10
@@ -220,13 +226,13 @@ def discover(
 
     with tqdm(
         total=total,
-        desc="Discover {epoch}",
+        desc=f"Discover {epoch}",  # f-string fix
         dynamic_ncols=True,
         bar_format=bar_format,
         unit="sample",
     ) as progress:
         for batch in loader:
-            # Move batch to device
+            # Move batch to device (unchanged)
             mask = batch["mask"].to(device)  # [B, L]
             embed = batch["embed"].to(device)  # [B, L, D]
             token_label = batch["token"].to(device)  # [B, T]
@@ -252,11 +258,23 @@ def discover(
                 device=device,
             )
 
+            # Non-finite guard (prevents bad optimizer steps)
+            if not torch.isfinite(loss):
+                optimizer.zero_grad()
+                continue
+
             loss_value = loss.item()
 
             # Backpropagation
             optimizer.zero_grad()
             loss.backward()
+
+            # Gradient clipping (see equation in docstring)
+            torch.nn.utils.clip_grad_norm_(
+                (p for m in finetune for p in m.parameters() if p.requires_grad),
+                max_norm=1.0,
+            )
+
             optimizer.step()
 
             # Progress tracking
@@ -268,7 +286,7 @@ def discover(
             )
 
             if callback:
-                callback(model=model, progress=progress, device=device)
+                callback(finetune, progress, device)  # pass the trainable models
 
             if count >= total:
                 break
