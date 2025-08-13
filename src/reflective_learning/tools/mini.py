@@ -32,7 +32,6 @@ facing_space = ["right", "down", "left", "up"]
 
 def f_step(step, max_steps):
     assert 0 < step, f"invalid step {step}"
-
     return f"success" if step <= max_steps else f"failure"
 
 
@@ -51,6 +50,7 @@ def f_observation(env_size, steps):
     start = tuple(int(e) for e in env.agent_pos)
     facing = facing_space[env.agent_dir]
     action = []
+    visited = {(start, env.agent_dir)}  # track visited (pos, dir) to avoid loops
 
     try:
         choice = [
@@ -59,9 +59,21 @@ def f_observation(env_size, steps):
             minigrid.core.actions.Actions.forward,
         ]
         for step in range(steps - 1):
-            selected = random.choice(choice)
-            env.step(selected)
-            action.append(selected.name)
+            # limit retries so we don't infinite loop
+            for _ in range(4 * steps):
+                selected = random.choice(choice)
+
+                old_pos, old_dir = tuple(env.agent_pos), env.agent_dir
+                env.step(selected)
+                new_state = (tuple(env.agent_pos), env.agent_dir)
+
+                if new_state not in visited:
+                    visited.add(new_state)
+                    action.append(selected.name)
+                    break
+                else:
+                    # revert and try again
+                    env.agent_pos, env.agent_dir = old_pos, old_dir
     finally:
         goal = tuple(int(v) for v in env.agent_pos)
         env.close()
@@ -88,10 +100,18 @@ def f_replay(env_size, max_steps, goal, start, facing, action):
     env.agent_pos = list(start)
     env.agent_dir = facing_space.index(facing)
 
+    # Track visited (pos, dir) to detect loops during replay
+    visited = {(tuple(int(e) for e in env.agent_pos), env.agent_dir)}
+
     try:
         for name in action[:-1]:
             assert name != minigrid.core.actions.Actions.done.name, f"{action}"
             env.step(getattr(minigrid.core.actions.Actions, name))
+
+            state_now = (tuple(int(e) for e in env.agent_pos), env.agent_dir)
+            if state_now in visited:
+                return max_steps + 1  # loop encountered -> failure
+            visited.add(state_now)
 
         name = action[-1]
         if name == minigrid.core.actions.Actions.done.name:

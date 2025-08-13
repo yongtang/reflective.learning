@@ -142,7 +142,7 @@ class ReflectiveCore(nn.Module):
 
         # Number of valid positions per example
         N = mask.sum(dim=1)  # [B]
-        count = (N - index).clamp_(min=0).clamp_(max=T)  # [B]
+        count = N - index  # [B]
         # count excludes the final target position — there is no "next token" to predict
         M = int(count.max().item())  # process only needed columns
 
