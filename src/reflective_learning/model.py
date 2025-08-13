@@ -179,6 +179,16 @@ class ReflectiveCore(nn.Module):
 
         Returns:
             logprob:  [B] length-normalized log-probability of each sequence
+
+        Equations (ASCII):
+            For each sequence b and step t (target token y_{b,t} at position pos_{b,t}):
+                logits_{b,t} = model(x_b)[pos_{b,t}, :]
+                logZ_{b,t}   = logsumexp(logits_{b,t})
+                logp_{b,t}   = logits_{b,t}[y_{b,t}] - logZ_{b,t}
+
+            Let valid_{b,t} ∈ {0,1} indicate whether this step is inside the sequence.
+            Length-normalized sequence score:
+                logP_b = ( Σ_t valid_{b,t} * logp_{b,t} ) / ( Σ_t valid_{b,t} + 1e-9 )
         """
         # Run the transformer to get logits at every position
         logit = self.call(mask=mask, embed=embed)  # [B, L, V]
@@ -194,15 +204,15 @@ class ReflectiveCore(nn.Module):
         valid = (
             (position >= 0)
             & ((position + 1) < L)
-            & mask.gather(1, (position + 1).clamp_(0, L - 1))
+            & mask.gather(1, (position + 1).clamp(0, L - 1))
         )
         position = position.clamp(0, L - 1)  # ensure positions are in range
 
         # Gather logits for each token prediction step
         step = logit.gather(1, position.unsqueeze(-1).expand(B, T, V))  # [B, T, V]
 
-        # Convert to log-probabilities
-        logp = F.log_softmax(step, dim=-1)  # [B, T, V]
+        # Convert to log-probabilities (stable log-softmax via logsumexp)
+        logp = step - torch.logsumexp(step, dim=-1, keepdim=True)
 
         # Keep only the log-prob assigned to the reference token
         logp = logp.gather(-1, token.unsqueeze(-1)).squeeze(-1)  # [B, T]
@@ -210,11 +220,11 @@ class ReflectiveCore(nn.Module):
         # Zero-out invalid positions
         logp = logp * valid.float()
 
-        # Compute sequence lengths (number of valid tokens)
-        lengths = token.ne(0).sum(dim=1).clamp(min=1)  # [B]
+        # Compute sequence lengths strictly from 'valid' steps
+        lengths = valid.sum(dim=1).float()  # [B]
 
-        # Length-normalized total log-probability per sequence
-        return logp.sum(dim=1) / lengths  # [B]
+        # Length-normalized total log-probability per sequence (add epsilon)
+        return logp.sum(dim=1) / (lengths + 1e-9)  # [B]
 
     def collate(self, batch):
         """
