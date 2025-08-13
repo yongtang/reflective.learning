@@ -102,14 +102,25 @@ def explore(
 
             # Next-token distribution from Bayes-balanced mixed logits:
             # probs = softmax( sum_k weight_k * logit_k )
-            probs = torch.softmax((weight[:, None] * logit).sum(dim=0), dim=0)  # [V]
+            mixed = (weight[:, None] * logit).sum(dim=0)  # [V]
+            # Safety: if any sub-model produced NaN/Inf logits this step, avoid propagating
+            # to softmax/multinomial; fall back to uniform for this token only.
+            if not torch.isfinite(mixed).all():
+                probs = torch.full_like(mixed, 1.0 / mixed.numel())
+            else:
+                probs = torch.softmax(mixed, dim=0)  # [V]
 
             prediction = torch.multinomial(probs, num_samples=1)  # [1]
             token = torch.cat([token, prediction], dim=0)  # [T+1]
 
             # Update S_k with the log-prob each model assigned to the single sampled token.
             # log_softmax(logit)[k, prediction] selects the same token column for all models.
-            S = S + torch.log_softmax(logit, dim=-1)[:, prediction].squeeze(1)  # [M]
+            logp = torch.log_softmax(logit, dim=-1)  # [M, V]
+            logp_k = logp[:, prediction].squeeze(1)  # [M]
+            # Keep S finite even if a model hard-masks a token (e.g., -inf logit at sampled index).
+            # In normal cases this clamp never activates (threshold is far below typical values).
+            logp_k = torch.clamp(logp_k, min=-30.0)
+            S = S + logp_k  # [M]
 
             # Early stop on STOP token (assumed id 0).
             if prediction.item() == 0:
