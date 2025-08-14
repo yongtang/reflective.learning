@@ -922,7 +922,7 @@ def run_discover(data, image, total, batch, epoch, lr, device):
 
     for e in range(epoch):
         statistics = {state: 0 for state in state_space}
-        with open(os.path.join(data, "stub.data"), "w") as f:
+        with open(os.path.join(data, f"stub.{e:08d}.data"), "w") as f:
             with tqdm(
                 total=total,
                 desc=f"Stub epoch {e} data",
