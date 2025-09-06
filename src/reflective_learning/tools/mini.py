@@ -954,7 +954,7 @@ def run_finetune(data, image, total, batch, interval, lr, device):
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch,
-            collate_fn=model[choice].collate,
+            collate_fn=lambda batch: tuple(map(model[choice].collate, zip(*batch))),
         )
 
         for entry in loader:
