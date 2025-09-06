@@ -28,7 +28,8 @@ def test_sequence():
     maximum = 10
 
     tokens = sequence(
-        model=model,
+        model=[model],
+        reduce=lambda logit: logit[0],
         prefix=prefix,
         maximum=maximum,
         device="cpu",

@@ -116,62 +116,115 @@ class ReflectiveCore(nn.Module):
         self,
         logit: torch.Tensor,  # [B, L, V] predicted logits for prefix + token
         token: torch.Tensor,  # [B, T] ground truth token indices
-        state: torch.Tensor,  # [B] ground truth state indices
-        weight: torch.Tensor,  # [S] weight per state (e.g. success=1.0, failure=0.1)
         index: torch.Tensor,  # [B] index where token sequence begins (first token position)
         mask: torch.Tensor,  # [B, L] boolean mask for valid positions in logits
     ) -> torch.Tensor:
         """
-        Computes cross-entropy loss for next-token prediction, with per-state weighting.
+        Computes cross-entropy loss for next-token prediction.
 
         Args:
             logit: [B, L, V] predicted logits for prefix + token.
                    Each position logit[b, t] predicts token[b, t + 1].
             token: [B, T] ground truth token indices (shifted right vs logits).
-            state: [B] ground truth state per example.
-            weight: [S] weight per state (e.g. success=1.0, failure=0.1)
             index: [B] index where token sequence starts in logits (i.e. position of token[0]).
             mask:  [B, L] boolean mask for valid positions in logits.
 
         Returns:
-            Scalar loss (cross entropy), averaged over valid tokens and weighted by state.
+            Scalar loss (cross entropy), averaged over valid tokens.
         """
-        B = logit.size(0)  # batch size
+        B, L, V = logit.shape
+        T = token.size(1)
 
-        total_loss = 0.0
-        total_weight = 0.0
+        # Offsets [0, 1, 2, ...]
+        I = torch.arange(T, device=logit.device).view(1, T)  # [1,T]
+        start = (index - 1).view(B, 1)  # [B,1]
+        position = start + I  # [B,T] positions in logits
 
-        for i in range(B):
-            # Index[i] is the position of token[0] in the sequence.
-            # The model predicts token[0] from position index[i] - 1
-            start = index[i].item() - 1  # Position in logits that predicts token[0]
+        # Number of valid positions per example
+        N = mask.sum(dim=1)  # [B]
+        count = N - index  # [B]
+        # count excludes the final target position — there is no "next token" to predict
+        M = int(count.max().item())  # process only needed columns
 
-            mask_i = mask[i]  # [L], mask for this sample
+        I = I[:, :M]  # [1,M]
+        position = position[:, :M].clamp_(min=0, max=L - 1)  # [B,M]
+        valid = I < count.view(B, 1)  # [B,M]
 
-            # Count how many valid tokens are predicted starting from start+1 to end of sequence
-            count_i = (
-                (mask_i[start + 1 :]).sum().item()
-            )  # how many predicted tokens to score
+        # Gather logits for each token prediction step
+        step = logit.gather(1, position.unsqueeze(-1).expand(B, M, V))  # [B,M,V]
 
-            # Slice predicted logits from model output for this example
-            # These predict token[0] ... token[count_i - 1]
-            logit_i = logit[i, start : start + count_i]  # [count_i, V]
+        # Cross-entropy for valid positions
+        loss_flat = F.cross_entropy(
+            step.reshape(-1, V), token[:, :M].reshape(-1), reduction="none"
+        ).view(
+            B, M
+        )  # [B,M]
 
-            # Corresponding ground truth tokens
-            token_target = token[i, :count_i]  # [count_i]
+        # Mask invalid positions
+        loss_flat = loss_flat * valid.float()  # [B,M]
 
-            # Get scalar weight for this example based on its state
-            state_weight = weight[state[i]]  # scalar
+        # Average over valid tokens
+        return loss_flat.sum() / valid.sum().clamp(min=1).float()
 
-            # Compute cross entropy loss over valid predicted tokens
-            loss_i = F.cross_entropy(logit_i, token_target, reduction="sum")  # scalar
+    def prob(self, mask, embed, token, index):
+        """
+        Compute length-normalized sequence log-probabilities log P(y | x) in batch,
+        leveraging collate() outputs.
 
-            # Weight loss by state and accumulate
-            total_loss += loss_i * state_weight
-            total_weight += count_i * state_weight
+        Args:
+            mask:  [B, L]    from collate()
+            embed: [B, L, D] from collate()
+            token: [B, T]    from collate() (right-padded)
+            index: [B]       from collate() (position of token[0] in input)
 
-        # Return average loss per valid token, weighted by state
-        return total_loss / total_weight
+        Returns:
+            logprob:  [B] length-normalized log-probability of each sequence
+
+        Equations (ASCII):
+            For each sequence b and step t (target token y_{b,t} at position pos_{b,t}):
+                logits_{b,t} = model(x_b)[pos_{b,t}, :]
+                logZ_{b,t}   = logsumexp(logits_{b,t})
+                logp_{b,t}   = logits_{b,t}[y_{b,t}] - logZ_{b,t}
+
+            Let valid_{b,t} ∈ {0,1} indicate whether this step is inside the sequence.
+            Length-normalized sequence score:
+                logP_b = ( Σ_t valid_{b,t} * logp_{b,t} ) / ( Σ_t valid_{b,t} + 1e-9 )
+        """
+        # Run the transformer to get logits at every position
+        logit = self.call(mask=mask, embed=embed)  # [B, L, V]
+        B, L, V = logit.shape
+        T = token.size(1)
+
+        # Offsets for token positions: [0, 1, 2, ...]
+        I = torch.arange(T, device=mask.device).view(1, T)  # [1, T]
+        start = (index - 1).view(B, 1)  # position before the first token
+        position = start + I  # [B, T] positions in logits
+
+        # Mark valid positions: inside sequence length and not padding
+        valid = (
+            (position >= 0)
+            & ((position + 1) < L)
+            & mask.gather(1, (position + 1).clamp(0, L - 1))
+        )
+        position = position.clamp(0, L - 1)  # ensure positions are in range
+
+        # Gather logits for each token prediction step
+        step = logit.gather(1, position.unsqueeze(-1).expand(B, T, V))  # [B, T, V]
+
+        # Convert to log-probabilities (stable log-softmax via logsumexp)
+        logp = step - torch.logsumexp(step, dim=-1, keepdim=True)
+
+        # Keep only the log-prob assigned to the reference token
+        logp = logp.gather(-1, token.unsqueeze(-1)).squeeze(-1)  # [B, T]
+
+        # Zero-out invalid positions
+        logp = logp * valid.float()
+
+        # Compute sequence lengths strictly from 'valid' steps
+        lengths = valid.sum(dim=1).float()  # [B]
+
+        # Length-normalized total log-probability per sequence (add epsilon)
+        return logp.sum(dim=1) / (lengths + 1e-9)  # [B]
 
     def collate(self, batch):
         """

@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 import torch
 from tqdm import tqdm
@@ -6,11 +6,11 @@ from tqdm import tqdm
 from reflective_learning.model import ReflectiveCore
 
 
-def pretrain(
+def train(
     model: ReflectiveCore,
+    choice: str,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
-    weight: torch.Tensor,  # [S] — state → weight
     total: int,
     callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
     device: Optional[torch.device] = None,
@@ -20,9 +20,9 @@ def pretrain(
 
     Args:
         model: The ReflectiveCore model to train.
+        choice: The state to be trained.
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
-        weight: Weights of the desired states.
         total: Total number of training samples to process.
         callback: A function called periodically during training.
         device: Optional device override (defaults to CUDA if available).
@@ -37,20 +37,19 @@ def pretrain(
     )
 
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    weight = weight.to(device)  # ensure it's on the right device
+    model[choice].to(device)
 
     count = 0
 
     with tqdm(
         total=total,
-        desc="Train",
+        desc="Learn",
         dynamic_ncols=True,
         bar_format=bar_format,
         unit="sample",
     ) as progress:
         for batch in loader:
-            model.train()
+            model[choice].train()
 
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L]
@@ -68,12 +67,10 @@ def pretrain(
                 index = index[:chunk]
 
             # Forward pass (model returns [B, L, V])
-            logit = model.call(mask=mask, embed=embed)  # [B, L, V]
-            loss = model.loss(
+            logit = model[choice].call(mask=mask, embed=embed)  # [B, L, V]
+            loss = model[choice].loss(
                 logit=logit,
                 token=token_label,
-                state=state_label,
-                weight=weight,
                 index=index,
                 mask=mask,
             )
@@ -89,7 +86,7 @@ def pretrain(
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix_str(
-                f"loss={loss_value:{loss_width}.2e}  samples={count:{sample_width}d}"
+                f"loss={loss_value:{loss_width}.5e}  samples={count:{sample_width}d}"
             )
 
             if callback:

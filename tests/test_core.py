@@ -5,12 +5,9 @@ from reflective_learning.model import ReflectiveCore
 
 def test_reflective_transformer_forward_and_loss():
     vocab_size = 100
-    state_size = 4
     max_seq_len = 2
     max_prefix_len = 6
     batch_size = 2
-
-    weights = torch.Tensor([1.0, 1.0, 1.0, 1.0])  # [S]
 
     decoder = torch.nn.TransformerEncoder(
         torch.nn.TransformerEncoderLayer(
@@ -30,7 +27,6 @@ def test_reflective_transformer_forward_and_loss():
     )
 
     token = torch.randint(0, vocab_size, (batch_size, max_seq_len))  # [B, T]
-    state = torch.randint(0, state_size, (batch_size,))  # [B]
 
     d_model = decoder.layers[0].linear1.in_features
     prefix = torch.zeros(batch_size, max_prefix_len, d_model)  # [B, C, D]
@@ -54,7 +50,7 @@ def test_reflective_transformer_forward_and_loss():
     full_label = torch.cat([pad, label], dim=1)  # [B, C+T-1]
 
     index = torch.full((batch_size,), max_prefix_len, dtype=torch.long)  # [B]
-    loss = model.loss(logit, full_label, state, weights, index, mask)
+    loss = model.loss(logit, full_label, index, mask)
     assert loss.item() > 0
 
 

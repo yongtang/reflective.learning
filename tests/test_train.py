@@ -5,7 +5,7 @@ import tempfile
 import torch
 
 from reflective_learning.model import ReflectiveCore
-from reflective_learning.train import pretrain
+from reflective_learning.train import train
 
 
 class DummyDataset(torch.utils.data.Dataset):
@@ -35,18 +35,20 @@ def test_train_sanity():
         ),
         num_layers=1,
     )
-    model = ReflectiveCore(
-        vocab_size=10,
-        max_seq_len=16,
-        max_prefix_len=8,
-        decoder=decoder,
-    )
-
+    model = {
+        "info": {},
+        "success": ReflectiveCore(
+            vocab_size=10,
+            max_seq_len=16,
+            max_prefix_len=8,
+            decoder=decoder,
+        ),
+    }
     dataset = DummyDataset()
     loader = torch.utils.data.DataLoader(
-        dataset, batch_size=4, collate_fn=model.collate
+        dataset, batch_size=4, collate_fn=model["success"].collate
     )
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model["success"].parameters(), lr=1e-3)
 
     tmpdir = tempfile.mkdtemp()
 
@@ -55,11 +57,11 @@ def test_train_sanity():
             pass
 
     try:
-        pretrain(
+        train(
             model=model,
+            choice="success",
             loader=loader,
             optimizer=optimizer,
-            weight=torch.tensor([1.0, 1.0]),
             total=20,
             callback=f_callback,
             device=torch.device("cpu"),
