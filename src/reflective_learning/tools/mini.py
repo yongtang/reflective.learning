@@ -225,13 +225,14 @@ def f_sequence(
     facing,
     image,
     encoder,
+    info,
     model,
     device,
 ):
     env_size, max_steps, vocab = (
-        model["info"]["env"],
-        model["info"]["max"],
-        model["info"]["vocab"],
+        info["env"],
+        info["max"],
+        info["vocab"],
     )
 
     entry_text = f_text(
@@ -257,7 +258,7 @@ def f_sequence(
     )
 
     token = sequence(
-        model=list(model[choice] for choice in state_space),
+        model=model,
         reduce=lambda logit: logit[0] - logit[1],  # success - failure
         prefix=prefix,
         maximum=max_steps,
@@ -292,13 +293,14 @@ def f_explore(
     facing,
     image,
     encoder,
+    info,
     model,
     device,
 ):
     env_size, max_steps, vocab = (
-        model["info"]["env"],
-        model["info"]["max"],
-        model["info"]["vocab"],
+        info["env"],
+        info["max"],
+        info["vocab"],
     )
 
     prefix = f_prefix(
@@ -322,7 +324,7 @@ def f_explore(
     )
 
     token = explore(
-        model=list(model[choice] for choice in state_space),
+        model=model,
         prefix=prefix,
         maximum=max_steps,
         device=device,
@@ -433,10 +435,10 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
 
 
 def f_dataset(file, choice):
+    if not os.path.isfile(file):
+        return {}
     # Group by prefix
     entries = collections.defaultdict(list)
-    with open(file, "a") as f:
-        pass
     with open(file, "r") as f:
         with tqdm(
             total=os.path.getsize(file),
@@ -672,6 +674,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
     info, model = operator.itemgetter("info", choice)(
         torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
     )
+    model = f_model(info, model)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
@@ -681,14 +684,26 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
 
     with contextlib.ExitStack() as stack:
-        essential_f = stack.enter_context(
-            open(os.path.join(data, f"seed.{choice}.data"), "r")
+        essential_f = (
+            stack.enter_context(open(os.path.join(data, f"seed.{choice}.data"), "r"))
+            if os.path.isfile(os.path.join(data, f"seed.{choice}.data"))
+            else None
         )
-        essential_file = f"seed.{choice}.data"
-        reservoir_f = stack.enter_context(
-            open(os.path.join(data, f"data.{choice}.data"), "r")
+        essential_file = (
+            f"seed.{choice}.data"
+            if os.path.isfile(os.path.join(data, f"seed.{choice}.data"))
+            else None
         )
-        reservoir_file = f"data.{choice}.data"
+        reservoir_f = (
+            stack.enter_context(open(os.path.join(data, f"data.{choice}.data"), "r"))
+            if os.path.isfile(os.path.join(data, f"data.{choice}.data"))
+            else None
+        )
+        reservoir_file = (
+            f"data.{choice}.data"
+            if os.path.isfile(os.path.join(data, f"data.{choice}.data"))
+            else None
+        )
 
         essential = {
             k: np.concatenate(
@@ -766,15 +781,14 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
 
 def run_explore(data, image, total, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
-    model = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    model = {
-        "info": model["info"],
-        **{choice: f_model(model["info"], model[choice]) for choice in state_space},
-    }
+
+    load = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    info = load["info"]
+    model = list(f_model(info, load[choice]) for choice in state_space)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     for choice in state_space:
         if os.path.isfile(os.path.join(data, f"data.{choice}.data")):
@@ -821,12 +835,12 @@ def run_explore(data, image, total, device):
             for index in range(total):
                 while True:
                     goal = (
-                        random.randint(1, model["info"]["env"] - 2),
-                        random.randint(1, model["info"]["env"] - 2),
+                        random.randint(1, info["env"] - 2),
+                        random.randint(1, info["env"] - 2),
                     )
                     start = (
-                        random.randint(1, model["info"]["env"] - 2),
-                        random.randint(1, model["info"]["env"] - 2),
+                        random.randint(1, info["env"] - 2),
+                        random.randint(1, info["env"] - 2),
                     )
                     if goal != start:
                         break
@@ -838,11 +852,12 @@ def run_explore(data, image, total, device):
                     facing=facing,
                     image=image,
                     encoder=encoder,
+                    info=info,
                     model=model,
                     device=device,
                 )
                 token = torch.tensor(
-                    [model["info"]["vocab"][e] for e in entry["token"]],
+                    [info["vocab"][e] for e in entry["token"]],
                     dtype=torch.long,
                 )
                 prefix = f_prefix(
@@ -874,15 +889,14 @@ def run_explore(data, image, total, device):
 
 def run_play(goal, start, facing, model, device):
     print(f"Load model: {model}")
-    model = torch.load(model, map_location="cpu")
-    model = {
-        "info": model["info"],
-        **{choice: f_model(model["info"], model[choice]) for choice in state_space},
-    }
+
+    load = torch.load(model, map_location="cpu")
+    info = load["info"]
+    model = list(f_model(info, load[choice]) for choice in state_space)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     with tempfile.TemporaryDirectory() as image:
         entry = f_sequence(
@@ -891,6 +905,7 @@ def run_play(goal, start, facing, model, device):
             facing=facing,
             image=image,
             encoder=encoder,
+            info=info,
             model=model,
             device=device,
         )
