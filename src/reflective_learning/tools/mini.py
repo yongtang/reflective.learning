@@ -3,6 +3,7 @@ import collections
 import contextlib
 import functools
 import glob
+import itertools
 import json
 import operator
 import os
@@ -19,7 +20,7 @@ from tqdm import tqdm
 from reflective_learning.encoder import ContextEncoder
 from reflective_learning.inference import explore, sequence
 from reflective_learning.model import ReflectiveCore
-from reflective_learning.train import train
+from reflective_learning.train import dpo, train
 
 state_space = ["success", "failure"]
 action_space = [
@@ -488,6 +489,25 @@ class LearnDataset(torch.utils.data.IterableDataset):
             yield self.datum_fn(entry=json.loads(line))
 
 
+class FinetuneDataset(torch.utils.data.IterableDataset):
+    def __init__(self, dataset, datum_fn):
+        super().__init__()
+        self.dataset = dataset
+        self.datum_fn = datum_fn
+
+    def __iter__(self):
+        for entry in self.dataset:
+            (offset_a, steps_a, f_a, file_a), (offset_b, steps_b, f_b, file_b) = entry
+            f_a.seek(offset_a)
+            line_a = f_a.readline()
+            f_b.seek(offset_b)
+            line_b = f_b.readline()
+
+            yield self.datum_fn(entry=json.loads(line_a)), self.datum_fn(
+                entry=json.loads(line_b)
+            )
+
+
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     step_width = len(str(max_steps))
     total_width = len(str(num_seeds))
@@ -878,6 +898,130 @@ def run_explore(data, image, total, device):
     return
 
 
+def run_finetune(data, image, total, batch, interval, lr, device):
+    print(f"Load model: {os.path.join(data, f'model.pt')}")
+
+    model = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    model = {
+        "info": model["info"],
+        **{choice: f_model(model["info"], model[choice]) for choice in state_space},
+    }
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
+
+    basis = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    basis = {
+        "info": basis["info"],
+        **{choice: f_model(basis["info"], basis[choice]) for choice in state_space},
+    }
+
+    choice = "success"
+
+    essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
+    reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
+
+    with contextlib.ExitStack() as stack:
+        essential_f = stack.enter_context(
+            open(os.path.join(data, f"seed.{choice}.data"), "r")
+        )
+        essential_file = f"seed.{choice}.data"
+        reservoir_f = stack.enter_context(
+            open(os.path.join(data, f"data.{choice}.data"), "r")
+        )
+        reservoir_file = f"data.{choice}.data"
+
+        essential = {
+            k: np.concatenate(
+                [
+                    np.array(v),
+                    np.full((len(v), 1), essential_f, dtype=object),
+                    np.full((len(v), 1), essential_file, dtype=object),
+                ],
+                axis=1,
+            )
+            for k, v in essential.items()
+        }
+        reservoir = {
+            k: np.concatenate(
+                [
+                    np.array(v),
+                    np.full((len(v), 1), reservoir_f, dtype=object),
+                    np.full((len(v), 1), reservoir_file, dtype=object),
+                ],
+                axis=1,
+            )
+            for k, v in reservoir.items()
+        }
+
+        def f_pair(v):
+            p = []
+            for i in range(1, model["info"]["max"]):
+                for j in range(i + 1, model["info"]["max"] + 1):
+                    v_i = v[v[:, 1] == i]
+                    v_j = v[v[:, 1] == j]
+                    if len(v_i) and len(v_j):
+                        p.extend([(a, b) for a, b in itertools.product(v_i, v_j)])
+
+            return np.array(p)
+
+        entries = {
+            k: np.concatenate(
+                [
+                    essential.get(k, np.empty((0, 4), dtype=object)),
+                    reservoir.get(k, np.empty((0, 4), dtype=object)),
+                ],
+                axis=0,
+            )
+            for k in (essential.keys() | reservoir.keys())
+        }
+
+        pairs = np.concatenate(
+            list(filter(lambda e: len(e) > 0, map(f_pair, entries.values()))), axis=0
+        )
+
+        random = np.random.default_rng()
+
+        dataset = pairs[random.integers(0, len(pairs), size=total)]
+        random.shuffle(dataset)
+
+        dataset = FinetuneDataset(
+            dataset=dataset,
+            datum_fn=functools.partial(
+                f_datum,
+                vocab_fn=lambda e: model["info"]["vocab"][e],
+                state_fn=lambda e: state_space.index(e),
+                max_steps=model["info"]["max"],
+                image=image,
+                encoder=encoder,
+            ),
+        )
+
+        optimizer = torch.optim.Adam(model[choice].parameters(), lr=lr)
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch,
+            collate_fn=lambda batch: tuple(map(model[choice].collate, zip(*batch))),
+        )
+
+        dpo(
+            basis=basis,
+            model=model,
+            choice=choice,
+            loader=loader,
+            optimizer=optimizer,
+            total=total,
+            callback=functools.partial(
+                f_callback,
+                data=data,
+                interval=interval,
+            ),
+            device=device,
+        )
+
+
 def run_play(goal, start, facing, model, device):
     print(f"Load model: {model}")
 
@@ -951,6 +1095,16 @@ def main():
     explore_parser.add_argument("--total", type=int, required=True)
     explore_parser.add_argument("--device")
 
+    # ---- finetune mode ----
+    finetune_parser = subparsers.add_parser("finetune", help="Finetune mode")
+    finetune_parser.add_argument("--data", required=True)
+    finetune_parser.add_argument("--image", required=True)
+    finetune_parser.add_argument("--total", type=int, required=True)
+    finetune_parser.add_argument("--batch", type=int, required=True)
+    finetune_parser.add_argument("--interval", type=int, required=True)
+    finetune_parser.add_argument("--lr", type=float, required=True)
+    finetune_parser.add_argument("--device")
+
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Play mode")
     play_parser.add_argument("--model", required=True)
@@ -981,6 +1135,25 @@ def main():
     elif args.mode == "learn":
         run_learn(
             choice=args.choice,
+            data=args.data,
+            image=args.image,
+            total=args.total,
+            batch=args.batch,
+            interval=args.interval,
+            lr=args.lr,
+            device=args.device,
+        )
+
+    elif args.mode == "explore":
+        run_explore(
+            data=args.data,
+            image=args.image,
+            total=args.total,
+            device=args.device,
+        )
+
+    elif args.mode == "finetune":
+        run_finetune(
             data=args.data,
             image=args.image,
             total=args.total,
