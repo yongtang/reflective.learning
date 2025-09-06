@@ -854,6 +854,98 @@ def run_explore(data, image, total, device):
     return
 
 
+def run_finetune(data, image, total, batch, interval, lr, device):
+    print(f"Load model: {os.path.join(data, f'model.pt')}")
+
+    model = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    model = {
+        "info": model["info"],
+        **{choice: f_model(model["info"], model[choice]) for choice in state_space},
+    }
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
+
+    choice = "success"
+    essential, reservoir = f_dataset(data, choice)
+    with contextlib.ExitStack() as stack:
+        essential_f = stack.enter_context(
+            open(os.path.join(data, f"seed.{choice}.data"), "r")
+        )
+        essential_file = f"seed.{choice}.data"
+        reservoir_f = stack.enter_context(
+            open(os.path.join(data, f"data.{choice}.data"), "r")
+        )
+        reservoir_file = f"data.{choice}.data"
+
+        essential = np.stack(
+            [
+                np.array(essential),
+                np.full(len(essential), essential_f, dtype=object),
+                np.full(len(essential), essential_file, dtype=object),
+            ],
+            axis=1,
+        )
+        reservoir = np.stack(
+            [
+                np.array(reservoir),
+                np.full(len(reservoir), reservoir_f, dtype=object),
+                np.full(len(reservoir), reservoir_file, dtype=object),
+            ],
+            axis=1,
+        )
+
+        assert len(essential) or len(reservoir)
+
+        essential = essential if len(essential) else reservoir
+        reservoir = reservoir if len(reservoir) else essential
+
+        assert False
+
+        random = np.random.default_rng()
+
+        assert total % 2 == 0
+        essential = essential[random.integers(0, len(essential), size=total // 2)]
+        reservoir = reservoir[random.integers(0, len(reservoir), size=total // 2)]
+
+        dataset = np.concatenate([essential, reservoir], axis=0)
+        random.shuffle(dataset)
+
+        dataset = LearnDataset(
+            dataset=dataset,
+            datum_fn=functools.partial(
+                f_datum,
+                vocab_fn=lambda e: model["info"]["vocab"][e],
+                state_fn=lambda e: state_space.index(e),
+                max_steps=model["info"]["max"],
+                image=image,
+                encoder=encoder,
+            ),
+        )
+
+        optimizer = torch.optim.Adam(model[choice].parameters(), lr=lr)
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch,
+            collate_fn=model[choice].collate,
+        )
+        train(
+            model=model,
+            choice=choice,
+            loader=loader,
+            optimizer=optimizer,
+            total=total,
+            callback=functools.partial(
+                f_callback,
+                data=data,
+                interval=interval,
+            ),
+            device=device,
+        )
+
+
 def run_play(goal, start, facing, model, device):
     print(f"Load model: {model}")
     model = torch.load(model, map_location="cpu")
@@ -927,6 +1019,16 @@ def main():
     explore_parser.add_argument("--total", type=int, required=True)
     explore_parser.add_argument("--device")
 
+    # ---- finetune mode ----
+    finetune_parser = subparsers.add_parser("finetune", help="Finetune mode")
+    finetune_parser.add_argument("--data", required=True)
+    finetune_parser.add_argument("--image", required=True)
+    finetune_parser.add_argument("--total", type=int, required=True)
+    finetune_parser.add_argument("--batch", type=int, required=True)
+    finetune_parser.add_argument("--interval", type=int, required=True)
+    finetune_parser.add_argument("--lr", type=float, required=True)
+    finetune_parser.add_argument("--device")
+
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Play mode")
     play_parser.add_argument("--model", required=True)
@@ -957,6 +1059,25 @@ def main():
     elif args.mode == "learn":
         run_learn(
             choice=args.choice,
+            data=args.data,
+            image=args.image,
+            total=args.total,
+            batch=args.batch,
+            interval=args.interval,
+            lr=args.lr,
+            device=args.device,
+        )
+
+    elif args.mode == "explore":
+        run_explore(
+            data=args.data,
+            image=args.image,
+            total=args.total,
+            device=args.device,
+        )
+
+    elif args.mode == "finetune":
+        run_finetune(
             data=args.data,
             image=args.image,
             total=args.total,
