@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import contextlib
 import functools
 import glob
@@ -868,7 +869,9 @@ def run_finetune(data, image, total, batch, interval, lr, device):
     encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
 
     choice = "success"
-    essential, reservoir = f_dataset(data, choice)
+    essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
+    reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
+
     with contextlib.ExitStack() as stack:
         essential_f = stack.enter_context(
             open(os.path.join(data, f"seed.{choice}.data"), "r")
@@ -879,40 +882,44 @@ def run_finetune(data, image, total, batch, interval, lr, device):
         )
         reservoir_file = f"data.{choice}.data"
 
-        essential = np.stack(
+        essential = np.concatenate(
             [
                 np.array(essential),
-                np.full(len(essential), essential_f, dtype=object),
-                np.full(len(essential), essential_file, dtype=object),
+                np.full((len(essential), 1), essential_f, dtype=object),
+                np.full((len(essential), 1), essential_file, dtype=object),
             ],
             axis=1,
         )
-        reservoir = np.stack(
+        reservoir = np.concatenate(
             [
                 np.array(reservoir),
-                np.full(len(reservoir), reservoir_f, dtype=object),
-                np.full(len(reservoir), reservoir_file, dtype=object),
+                np.full((len(reservoir), 1), reservoir_f, dtype=object),
+                np.full((len(reservoir), 1), reservoir_file, dtype=object),
             ],
             axis=1,
         )
 
-        assert len(essential) or len(reservoir)
+        entries = np.concatenate([essential, reservoir], axis=0)
 
-        essential = essential if len(essential) else reservoir
-        reservoir = reservoir if len(reservoir) else essential
+        pairs = []
+        for i in range(1, model["info"]["max"]):
+            for j in range(i + 1, model["info"]["max"] + 1):
+                entries_i = entries[entries[:, 1] == i]
+                entries_j = entries[entries[:, 1] == j]
+                if len(entries_i) and len(entries_j):
+                    pairs.extend(
+                        [(a, b) for a, b in itertools.product(entries_i, entries_j)]
+                    )
 
-        assert False
+        pairs = np.array(pairs)
 
         random = np.random.default_rng()
 
-        assert total % 2 == 0
-        essential = essential[random.integers(0, len(essential), size=total // 2)]
-        reservoir = reservoir[random.integers(0, len(reservoir), size=total // 2)]
-
-        dataset = np.concatenate([essential, reservoir], axis=0)
+        dataset = pairs[random.integers(0, len(pairs), size=total)]
         random.shuffle(dataset)
 
-        dataset = LearnDataset(
+        assert False
+        dataset = FinetuneDataset(
             dataset=dataset,
             datum_fn=functools.partial(
                 f_datum,
