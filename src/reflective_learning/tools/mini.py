@@ -464,6 +464,25 @@ class LearnDataset(torch.utils.data.IterableDataset):
             yield self.datum_fn(entry=json.loads(line))
 
 
+class FinetuneDataset(torch.utils.data.IterableDataset):
+    def __init__(self, dataset, datum_fn):
+        super().__init__()
+        self.dataset = dataset
+        self.datum_fn = datum_fn
+
+    def __iter__(self):
+        for entry in self.dataset:
+            (offset_a, steps_a, f_a, file_a), (offset_b, steps_b, f_b, file_b) = entry
+            f_a.seek(offset_a)
+            line_a = f_a.readline()
+            f_b.seek(offset_b)
+            line_b = f_b.readline()
+
+            yield self.datum_fn(entry=json.loads(line_a)), self.datum_fn(
+                entry=json.loads(line_b)
+            )
+
+
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     step_width = len(str(max_steps))
     total_width = len(str(num_seeds))
@@ -918,7 +937,6 @@ def run_finetune(data, image, total, batch, interval, lr, device):
         dataset = pairs[random.integers(0, len(pairs), size=total)]
         random.shuffle(dataset)
 
-        assert False
         dataset = FinetuneDataset(
             dataset=dataset,
             datum_fn=functools.partial(
@@ -938,6 +956,12 @@ def run_finetune(data, image, total, batch, interval, lr, device):
             batch_size=batch,
             collate_fn=model[choice].collate,
         )
+
+        for entry in loader:
+            print(entry)
+
+            assert False
+
         train(
             model=model,
             choice=choice,
