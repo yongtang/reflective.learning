@@ -256,7 +256,7 @@ def f_sequence(
 
     token = sequence(
         model=list(model[choice] for choice in state_space),
-        reduce=lambda logit: logit[0],
+        reduce=lambda logit: logit[0] - logit[1],  # success - failure
         prefix=prefix,
         maximum=max_steps,
         device=device,
