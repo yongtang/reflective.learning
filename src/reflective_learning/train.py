@@ -8,7 +8,6 @@ from reflective_learning.model import ReflectiveCore
 
 def train(
     model: ReflectiveCore,
-    choice: str,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     total: int,
@@ -20,7 +19,6 @@ def train(
 
     Args:
         model: The ReflectiveCore model to train.
-        choice: The state to be trained.
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
         total: Total number of training samples to process.
@@ -37,7 +35,7 @@ def train(
     )
 
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model[choice].to(device)
+    model.to(device)
 
     count = 0
 
@@ -49,7 +47,7 @@ def train(
         unit="sample",
     ) as progress:
         for batch in loader:
-            model[choice].train()
+            model.train()
 
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L]
@@ -67,8 +65,8 @@ def train(
                 index = index[:chunk]
 
             # Forward pass (model returns [B, L, V])
-            logit = model[choice].call(mask=mask, embed=embed)  # [B, L, V]
-            loss = model[choice].loss(
+            logit = model.call(mask=mask, embed=embed)  # [B, L, V]
+            loss = model.loss(
                 logit=logit,
                 token=token_label,
                 index=index,

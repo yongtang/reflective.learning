@@ -4,6 +4,7 @@ import contextlib
 import functools
 import glob
 import json
+import operator
 import os
 import random
 import shutil
@@ -351,6 +352,7 @@ def f_explore(
 
 def f_callback(
     data,
+    choice,
     interval,
     model,
     progress,
@@ -378,12 +380,12 @@ def f_callback(
         os.path.join(data, f"model.{1:03d}.pt"),
     )
 
+    save = torch.load(os.path.join(data, f"model.{1:03d}.pt"), map_location="cpu")
+    save[choice] = model.state_dict()
+
     # save model
     torch.save(
-        {
-            "info": model["info"],
-            **{choice: model[choice].state_dict() for choice in state_space},
-        },
+        save,
         os.path.join(data, f"model.pt"),
     )
 
@@ -667,15 +669,13 @@ def run_spin(seed, data, image, max_steps):
 def run_learn(choice, data, image, total, batch, interval, lr, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
 
-    model = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    model = {
-        "info": model["info"],
-        **{choice: f_model(model["info"], model[choice]) for choice in state_space},
-    }
+    info, model = operator.itemgetter("info", choice)(
+        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    )
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
@@ -734,30 +734,30 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
             dataset=dataset,
             datum_fn=functools.partial(
                 f_datum,
-                vocab_fn=lambda e: model["info"]["vocab"][e],
+                vocab_fn=lambda e: info["vocab"][e],
                 state_fn=lambda e: state_space.index(e),
-                max_steps=model["info"]["max"],
+                max_steps=info["max"],
                 image=image,
                 encoder=encoder,
             ),
         )
 
-        optimizer = torch.optim.Adam(model[choice].parameters(), lr=lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch,
-            collate_fn=model[choice].collate,
+            collate_fn=model.collate,
         )
         train(
             model=model,
-            choice=choice,
             loader=loader,
             optimizer=optimizer,
             total=total,
             callback=functools.partial(
                 f_callback,
                 data=data,
+                choice=choice,
                 interval=interval,
             ),
             device=device,

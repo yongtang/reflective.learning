@@ -35,20 +35,17 @@ def test_train_sanity():
         ),
         num_layers=1,
     )
-    model = {
-        "info": {},
-        "success": ReflectiveCore(
-            vocab_size=10,
-            max_seq_len=16,
-            max_prefix_len=8,
-            decoder=decoder,
-        ),
-    }
+    model = ReflectiveCore(
+        vocab_size=10,
+        max_seq_len=16,
+        max_prefix_len=8,
+        decoder=decoder,
+    )
     dataset = DummyDataset()
     loader = torch.utils.data.DataLoader(
-        dataset, batch_size=4, collate_fn=model["success"].collate
+        dataset, batch_size=4, collate_fn=model.collate
     )
-    optimizer = torch.optim.Adam(model["success"].parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     tmpdir = tempfile.mkdtemp()
 
@@ -59,7 +56,6 @@ def test_train_sanity():
     try:
         train(
             model=model,
-            choice="success",
             loader=loader,
             optimizer=optimizer,
             total=20,
