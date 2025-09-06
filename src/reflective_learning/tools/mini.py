@@ -429,6 +429,42 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     }
 
 
+def f_dataset(data, choice):
+    essential = []
+    with open(os.path.join(data, f"seed.{choice}.data"), "a") as f:
+        pass
+    with open(os.path.join(data, f"seed.{choice}.data"), "r") as f:
+        with tqdm(
+            total=os.path.getsize(os.path.join(data, f"seed.{choice}.data")),
+            desc=f"Seed {choice} check",
+            unit="B",
+            unit_scale=True,
+            dynamic_ncols=True,
+        ) as progress:
+            for line in f:
+                if line.strip():
+                    essential.append(progress.n)
+                progress.update(len(line.encode("utf-8")))
+
+    reservoir = []
+    with open(os.path.join(data, f"data.{choice}.data"), "a") as f:
+        pass
+    with open(os.path.join(data, f"data.{choice}.data"), "r") as f:
+        with tqdm(
+            total=os.path.getsize(os.path.join(data, f"data.{choice}.data")),
+            desc=f"Data {choice} check",
+            unit="B",
+            unit_scale=True,
+            dynamic_ncols=True,
+        ) as progress:
+            for line in f:
+                if line.strip():
+                    reservoir.append(progress.n)
+                progress.update(len(line.encode("utf-8")))
+
+    return essential, reservoir
+
+
 class LearnDataset(torch.utils.data.IterableDataset):
     def __init__(self, dataset, datum_fn):
         super().__init__()
@@ -648,38 +684,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
 
     encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
 
-    essential = []
-    with open(os.path.join(data, f"seed.{choice}.data"), "a") as f:
-        pass
-    with open(os.path.join(data, f"seed.{choice}.data"), "r") as f:
-        with tqdm(
-            total=os.path.getsize(os.path.join(data, f"seed.{choice}.data")),
-            desc=f"Seed {choice} check",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            for line in f:
-                if line.strip():
-                    essential.append(progress.n)
-                progress.update(len(line.encode("utf-8")))
-
-    reservoir = []
-    with open(os.path.join(data, f"data.{choice}.data"), "a") as f:
-        pass
-    with open(os.path.join(data, f"data.{choice}.data"), "r") as f:
-        with tqdm(
-            total=os.path.getsize(os.path.join(data, f"data.{choice}.data")),
-            desc=f"Data {choice} check",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            for line in f:
-                if line.strip():
-                    reservoir.append(progress.n)
-                progress.update(len(line.encode("utf-8")))
-
+    essential, reservoir = f_dataset(data, choice)
     with contextlib.ExitStack() as stack:
         essential_f = stack.enter_context(
             open(os.path.join(data, f"seed.{choice}.data"), "r")
