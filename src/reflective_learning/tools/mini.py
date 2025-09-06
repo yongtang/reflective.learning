@@ -1,4 +1,5 @@
 import argparse
+import collections
 import contextlib
 import functools
 import glob
@@ -430,7 +431,8 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
 
 
 def f_dataset(file, choice):
-    entries = []
+    # Group by prefix
+    entries = collections.defaultdict(list)
     with open(file, "a") as f:
         pass
     with open(file, "r") as f:
@@ -444,9 +446,16 @@ def f_dataset(file, choice):
             for line in f:
                 if line.strip():
                     entry = json.loads(line)
-                    entries.append((progress.n, len(entry["token"])))
+                    key = json.dumps(
+                        {
+                            "text": entry["text"],
+                            "image": entry["image"],
+                        },
+                        sort_keys=True,
+                    )
+                    entries[key].append((progress.n, len(entry["token"])))
                 progress.update(len(line.encode("utf-8")))
-    return np.array(entries).reshape((-1, 2))
+    return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
 class LearnDataset(torch.utils.data.IterableDataset):
@@ -681,27 +690,36 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
         )
         reservoir_file = f"data.{choice}.data"
 
-        essential = np.concatenate(
-            [
-                np.array(essential),
-                np.full((len(essential), 1), essential_f, dtype=object),
-                np.full((len(essential), 1), essential_file, dtype=object),
-            ],
-            axis=1,
-        )
-        reservoir = np.concatenate(
-            [
-                np.array(reservoir),
-                np.full((len(reservoir), 1), reservoir_f, dtype=object),
-                np.full((len(reservoir), 1), reservoir_file, dtype=object),
-            ],
-            axis=1,
-        )
+        essential = {
+            k: np.concatenate(
+                [
+                    np.array(v),
+                    np.full((len(v), 1), essential_f, dtype=object),
+                    np.full((len(v), 1), essential_file, dtype=object),
+                ],
+                axis=1,
+            )
+            for k, v in essential.items()
+        }
+        reservoir = {
+            k: np.concatenate(
+                [
+                    np.array(v),
+                    np.full((len(v), 1), reservoir_f, dtype=object),
+                    np.full((len(v), 1), reservoir_file, dtype=object),
+                ],
+                axis=1,
+            )
+            for k, v in reservoir.items()
+        }
 
         assert len(essential) or len(reservoir)
 
         essential = essential if len(essential) else reservoir
         reservoir = reservoir if len(reservoir) else essential
+
+        essential = np.concatenate(list(essential.values()), axis=0)
+        reservoir = np.concatenate(list(reservoir.values()), axis=0)
 
         random = np.random.default_rng()
 
