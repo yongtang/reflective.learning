@@ -689,15 +689,17 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
         essential_f = stack.enter_context(
             open(os.path.join(data, f"seed.{choice}.data"), "r")
         )
+        essential_file = f"seed.{choice}.data"
         reservoir_f = stack.enter_context(
             open(os.path.join(data, f"data.{choice}.data"), "r")
         )
+        reservoir_file = f"data.{choice}.data"
 
         essential = np.stack(
             [
                 np.array(essential),
                 np.full(len(essential), essential_f, dtype=object),
-                np.full(len(essential), f"seed.{choice}.data", dtype=object),
+                np.full(len(essential), essential_file, dtype=object),
             ],
             axis=1,
         )
@@ -705,7 +707,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
             [
                 np.array(reservoir),
                 np.full(len(reservoir), reservoir_f, dtype=object),
-                np.full(len(reservoir), f"data.{choice}.data", dtype=object),
+                np.full(len(reservoir), reservoir_file, dtype=object),
             ],
             axis=1,
         )
