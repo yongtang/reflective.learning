@@ -429,40 +429,24 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     }
 
 
-def f_dataset(data, choice):
-    essential = []
-    with open(os.path.join(data, f"seed.{choice}.data"), "a") as f:
+def f_dataset(file, choice):
+    entries = []
+    with open(file, "a") as f:
         pass
-    with open(os.path.join(data, f"seed.{choice}.data"), "r") as f:
+    with open(file, "r") as f:
         with tqdm(
-            total=os.path.getsize(os.path.join(data, f"seed.{choice}.data")),
-            desc=f"Seed {choice} check",
+            total=os.path.getsize(file),
+            desc=f"Check {choice}",
             unit="B",
             unit_scale=True,
             dynamic_ncols=True,
         ) as progress:
             for line in f:
                 if line.strip():
-                    essential.append(progress.n)
+                    entry = json.loads(line)
+                    entries.append((progress.n, len(entry["token"])))
                 progress.update(len(line.encode("utf-8")))
-
-    reservoir = []
-    with open(os.path.join(data, f"data.{choice}.data"), "a") as f:
-        pass
-    with open(os.path.join(data, f"data.{choice}.data"), "r") as f:
-        with tqdm(
-            total=os.path.getsize(os.path.join(data, f"data.{choice}.data")),
-            desc=f"Data {choice} check",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            for line in f:
-                if line.strip():
-                    reservoir.append(progress.n)
-                progress.update(len(line.encode("utf-8")))
-
-    return essential, reservoir
+    return np.array(entries).reshape((-1, 2))
 
 
 class LearnDataset(torch.utils.data.IterableDataset):
@@ -473,7 +457,7 @@ class LearnDataset(torch.utils.data.IterableDataset):
 
     def __iter__(self):
         for entry in self.dataset:
-            offset, f, file = entry
+            offset, steps, f, file = entry
             f.seek(offset)
             line = f.readline()
             yield self.datum_fn(entry=json.loads(line))
@@ -684,7 +668,9 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
 
     encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
 
-    essential, reservoir = f_dataset(data, choice)
+    essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
+    reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
+
     with contextlib.ExitStack() as stack:
         essential_f = stack.enter_context(
             open(os.path.join(data, f"seed.{choice}.data"), "r")
@@ -695,19 +681,19 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
         )
         reservoir_file = f"data.{choice}.data"
 
-        essential = np.stack(
+        essential = np.concatenate(
             [
                 np.array(essential),
-                np.full(len(essential), essential_f, dtype=object),
-                np.full(len(essential), essential_file, dtype=object),
+                np.full((len(essential), 1), essential_f, dtype=object),
+                np.full((len(essential), 1), essential_file, dtype=object),
             ],
             axis=1,
         )
-        reservoir = np.stack(
+        reservoir = np.concatenate(
             [
                 np.array(reservoir),
-                np.full(len(reservoir), reservoir_f, dtype=object),
-                np.full(len(reservoir), reservoir_file, dtype=object),
+                np.full((len(reservoir), 1), reservoir_f, dtype=object),
+                np.full((len(reservoir), 1), reservoir_file, dtype=object),
             ],
             axis=1,
         )
