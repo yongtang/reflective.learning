@@ -463,16 +463,28 @@ def f_dataset(file, choice):
 
 
 class LearnDataset(torch.utils.data.IterableDataset):
-    def __init__(self, dataset, datum_fn):
+    def __init__(self, dataset, datum_fn, data):
         super().__init__()
         self.dataset = dataset
         self.datum_fn = datum_fn
+        self.data = data
+
+    def __enter__(self):
+        self.stack = contextlib.ExitStack()
+        self.file = {
+            file: self.stack.enter_context(open(os.path.join(self.data, file), "r"))
+            for file in np.unique(self.dataset[:, 2])
+        }
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self.stack.__exit__(exc_type, exc, tb)
 
     def __iter__(self):
         for entry in self.dataset:
-            offset, steps, f, file = entry
-            f.seek(offset)
-            line = f.readline()
+            offset, steps, file = entry
+            self.file[file].seek(offset)
+            line = self.file[file].readline()
             yield self.datum_fn(entry=json.loads(line))
 
 
@@ -683,79 +695,58 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
 
-    with contextlib.ExitStack() as stack:
-        essential_f = (
-            stack.enter_context(open(os.path.join(data, f"seed.{choice}.data"), "r"))
-            if os.path.isfile(os.path.join(data, f"seed.{choice}.data"))
-            else None
+    essential_file = f"seed.{choice}.data"
+    reservoir_file = f"data.{choice}.data"
+
+    essential = {
+        k: np.concatenate(
+            [
+                np.array(v),
+                np.full((len(v), 1), essential_file, dtype=object),
+            ],
+            axis=1,
         )
-        essential_file = (
-            f"seed.{choice}.data"
-            if os.path.isfile(os.path.join(data, f"seed.{choice}.data"))
-            else None
+        for k, v in essential.items()
+    }
+    reservoir = {
+        k: np.concatenate(
+            [
+                np.array(v),
+                np.full((len(v), 1), reservoir_file, dtype=object),
+            ],
+            axis=1,
         )
-        reservoir_f = (
-            stack.enter_context(open(os.path.join(data, f"data.{choice}.data"), "r"))
-            if os.path.isfile(os.path.join(data, f"data.{choice}.data"))
-            else None
-        )
-        reservoir_file = (
-            f"data.{choice}.data"
-            if os.path.isfile(os.path.join(data, f"data.{choice}.data"))
-            else None
-        )
+        for k, v in reservoir.items()
+    }
+    assert len(essential) or len(reservoir)
 
-        essential = {
-            k: np.concatenate(
-                [
-                    np.array(v),
-                    np.full((len(v), 1), essential_f, dtype=object),
-                    np.full((len(v), 1), essential_file, dtype=object),
-                ],
-                axis=1,
-            )
-            for k, v in essential.items()
-        }
-        reservoir = {
-            k: np.concatenate(
-                [
-                    np.array(v),
-                    np.full((len(v), 1), reservoir_f, dtype=object),
-                    np.full((len(v), 1), reservoir_file, dtype=object),
-                ],
-                axis=1,
-            )
-            for k, v in reservoir.items()
-        }
+    essential = essential if len(essential) else reservoir
+    reservoir = reservoir if len(reservoir) else essential
 
-        assert len(essential) or len(reservoir)
+    essential = np.concatenate(list(essential.values()), axis=0)
+    reservoir = np.concatenate(list(reservoir.values()), axis=0)
 
-        essential = essential if len(essential) else reservoir
-        reservoir = reservoir if len(reservoir) else essential
+    random = np.random.default_rng()
 
-        essential = np.concatenate(list(essential.values()), axis=0)
-        reservoir = np.concatenate(list(reservoir.values()), axis=0)
+    assert total % 2 == 0
+    essential = essential[random.integers(0, len(essential), size=total // 2)]
+    reservoir = reservoir[random.integers(0, len(reservoir), size=total // 2)]
 
-        random = np.random.default_rng()
+    dataset = np.concatenate([essential, reservoir], axis=0)
+    random.shuffle(dataset)
 
-        assert total % 2 == 0
-        essential = essential[random.integers(0, len(essential), size=total // 2)]
-        reservoir = reservoir[random.integers(0, len(reservoir), size=total // 2)]
-
-        dataset = np.concatenate([essential, reservoir], axis=0)
-        random.shuffle(dataset)
-
-        dataset = LearnDataset(
-            dataset=dataset,
-            datum_fn=functools.partial(
-                f_datum,
-                vocab_fn=lambda e: info["vocab"][e],
-                state_fn=lambda e: state_space.index(e),
-                max_steps=info["max"],
-                image=image,
-                encoder=encoder,
-            ),
-        )
+    with LearnDataset(
+        dataset=dataset,
+        datum_fn=functools.partial(
+            f_datum,
+            vocab_fn=lambda e: info["vocab"][e],
+            state_fn=lambda e: state_space.index(e),
+            max_steps=info["max"],
+            image=image,
+            encoder=encoder,
+        ),
+        data=data,
+    ) as dataset:
 
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
