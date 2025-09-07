@@ -95,9 +95,8 @@ def train(
 
 
 def dpo(
-    basis: ReflectiveCore,
-    model: ReflectiveCore,
-    choice: str,
+    baseline: ReflectiveCore,
+    finetune: ReflectiveCore,
     loader: torch.utils.data.DataLoader,
     optimizer: torch.optim.Optimizer,
     total: int,
@@ -114,8 +113,8 @@ def dpo(
     )
 
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    basis[choice].to(device)
-    model[choice].to(device)
+    baseline.to(device)
+    finetune.to(device)
 
     count = 0
 
@@ -127,7 +126,7 @@ def dpo(
         unit="sample",
     ) as progress:
         for batch in loader:
-            model[choice].train()
+            finetune.train()
 
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L]

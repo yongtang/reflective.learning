@@ -490,18 +490,30 @@ class LearnDataset(torch.utils.data.IterableDataset):
 
 
 class FinetuneDataset(torch.utils.data.IterableDataset):
-    def __init__(self, dataset, datum_fn):
+    def __init__(self, dataset, datum_fn, data):
         super().__init__()
         self.dataset = dataset
         self.datum_fn = datum_fn
+        self.data = data
+
+    def __enter__(self):
+        self.stack = contextlib.ExitStack()
+        self.file = {
+            file: self.stack.enter_context(open(os.path.join(self.data, file), "r"))
+            for file in np.unique(self.dataset[:, :, 2])
+        }
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self.stack.__exit__(exc_type, exc, tb)
 
     def __iter__(self):
         for entry in self.dataset:
-            (offset_a, steps_a, f_a, file_a), (offset_b, steps_b, f_b, file_b) = entry
-            f_a.seek(offset_a)
-            line_a = f_a.readline()
-            f_b.seek(offset_b)
-            line_b = f_b.readline()
+            (offset_a, steps_a, file_a), (offset_b, steps_b, file_b) = entry
+            self.file[file_a].seek(offset_a)
+            line_a = self.file[file_a].readline()
+            self.file[file_b].seek(offset_b)
+            line_b = self.file[file_b].readline()
 
             yield self.datum_fn(entry=json.loads(line_a)), self.datum_fn(
                 entry=json.loads(line_b)
@@ -901,121 +913,107 @@ def run_explore(data, image, total, device):
 def run_finetune(data, image, total, batch, interval, lr, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
 
-    model = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    model = {
-        "info": model["info"],
-        **{choice: f_model(model["info"], model[choice]) for choice in state_space},
-    }
+    choice = "success"
+
+    info, finetune = operator.itemgetter("info", choice)(
+        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    )
+    baseline = f_model(info, finetune)
+    finetune = f_model(info, finetune)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    encoder = ContextEncoder.from_pretrained(model["info"]["context"], device=device)
-
-    basis = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    basis = {
-        "info": basis["info"],
-        **{choice: f_model(basis["info"], basis[choice]) for choice in state_space},
-    }
-
-    choice = "success"
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
 
-    with contextlib.ExitStack() as stack:
-        essential_f = stack.enter_context(
-            open(os.path.join(data, f"seed.{choice}.data"), "r")
+    essential_file = f"seed.{choice}.data"
+    reservoir_file = f"data.{choice}.data"
+
+    essential = {
+        k: np.concatenate(
+            [
+                np.array(v),
+                np.full((len(v), 1), essential_file, dtype=object),
+            ],
+            axis=1,
         )
-        essential_file = f"seed.{choice}.data"
-        reservoir_f = stack.enter_context(
-            open(os.path.join(data, f"data.{choice}.data"), "r")
+        for k, v in essential.items()
+    }
+    reservoir = {
+        k: np.concatenate(
+            [
+                np.array(v),
+                np.full((len(v), 1), reservoir_file, dtype=object),
+            ],
+            axis=1,
         )
-        reservoir_file = f"data.{choice}.data"
+        for k, v in reservoir.items()
+    }
 
-        essential = {
-            k: np.concatenate(
-                [
-                    np.array(v),
-                    np.full((len(v), 1), essential_f, dtype=object),
-                    np.full((len(v), 1), essential_file, dtype=object),
-                ],
-                axis=1,
-            )
-            for k, v in essential.items()
-        }
-        reservoir = {
-            k: np.concatenate(
-                [
-                    np.array(v),
-                    np.full((len(v), 1), reservoir_f, dtype=object),
-                    np.full((len(v), 1), reservoir_file, dtype=object),
-                ],
-                axis=1,
-            )
-            for k, v in reservoir.items()
-        }
+    def f_pair(v):
+        p = []
+        for i in range(1, info["max"]):
+            for j in range(i + 1, info["max"] + 1):
+                v_i = v[v[:, 1] == i]
+                v_j = v[v[:, 1] == j]
+                if len(v_i) and len(v_j):
+                    p.extend([(a, b) for a, b in itertools.product(v_i, v_j)])
 
-        def f_pair(v):
-            p = []
-            for i in range(1, model["info"]["max"]):
-                for j in range(i + 1, model["info"]["max"] + 1):
-                    v_i = v[v[:, 1] == i]
-                    v_j = v[v[:, 1] == j]
-                    if len(v_i) and len(v_j):
-                        p.extend([(a, b) for a, b in itertools.product(v_i, v_j)])
+        return np.array(p)
 
-            return np.array(p)
-
-        entries = {
-            k: np.concatenate(
-                [
-                    essential.get(k, np.empty((0, 4), dtype=object)),
-                    reservoir.get(k, np.empty((0, 4), dtype=object)),
-                ],
-                axis=0,
-            )
-            for k in (essential.keys() | reservoir.keys())
-        }
-
-        pairs = np.concatenate(
-            list(filter(lambda e: len(e) > 0, map(f_pair, entries.values()))), axis=0
+    entries = {
+        k: np.concatenate(
+            [
+                essential.get(k, np.empty((0, 3), dtype=object)),
+                reservoir.get(k, np.empty((0, 3), dtype=object)),
+            ],
+            axis=0,
         )
+        for k in (essential.keys() | reservoir.keys())
+    }
 
-        random = np.random.default_rng()
+    pairs = np.concatenate(
+        list(filter(lambda e: len(e) > 0, map(f_pair, entries.values()))), axis=0
+    )
 
-        dataset = pairs[random.integers(0, len(pairs), size=total)]
-        random.shuffle(dataset)
+    random = np.random.default_rng()
 
-        dataset = FinetuneDataset(
-            dataset=dataset,
-            datum_fn=functools.partial(
-                f_datum,
-                vocab_fn=lambda e: model["info"]["vocab"][e],
-                state_fn=lambda e: state_space.index(e),
-                max_steps=model["info"]["max"],
-                image=image,
-                encoder=encoder,
-            ),
-        )
+    dataset = pairs[random.integers(0, len(pairs), size=total)]
+    random.shuffle(dataset)
 
-        optimizer = torch.optim.Adam(model[choice].parameters(), lr=lr)
+    with FinetuneDataset(
+        dataset=dataset,
+        datum_fn=functools.partial(
+            f_datum,
+            vocab_fn=lambda e: info["vocab"][e],
+            state_fn=lambda e: state_space.index(e),
+            max_steps=info["max"],
+            image=image,
+            encoder=encoder,
+        ),
+        data=data,
+    ) as dataset:
+
+        optimizer = torch.optim.Adam(finetune.parameters(), lr=lr)
 
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch,
-            collate_fn=lambda batch: tuple(map(model[choice].collate, zip(*batch))),
+            collate_fn=lambda batch: tuple(map(finetune.collate, zip(*batch))),
         )
 
         dpo(
-            basis=basis,
-            model=model,
-            choice=choice,
+            baseline=baseline,
+            finetune=finetune,
             loader=loader,
             optimizer=optimizer,
             total=total,
             callback=functools.partial(
                 f_callback,
                 data=data,
+                choice=choice,
                 interval=interval,
             ),
             device=device,
