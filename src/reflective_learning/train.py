@@ -151,24 +151,29 @@ def dpo(
                 batch_neg["index"].to(device),
             )  # [B]
 
-            if count + embed_pos.size(0) > total:
-                chunk = total - count
-                mask_pos, mask_neg = mask_pos[:chunk], mask_neg[:chunk]
-                embed_pos, embed_neg = embed_pos[:chunk], embed_neg[:chunk]
-                token_pos, token_neg = token_pos[:chunk], token_neg[:chunk]
-                state_pos, state_neg = state_pos[:chunk], state_neg[:chunk]
-                index_pos, index_neg = index_pos[:chunk], index_neg[:chunk]
+            batch_size = embed_pos.size(0)
+            if count + batch_size > total:
+                batch_size = total - count
+                mask_pos, mask_neg = mask_pos[:batch_size], mask_neg[:batch_size]
+                embed_pos, embed_neg = embed_pos[:batch_size], embed_neg[:batch_size]
+                token_pos, token_neg = token_pos[:batch_size], token_neg[:batch_size]
+                state_pos, state_neg = state_pos[:batch_size], state_neg[:batch_size]
+                index_pos, index_neg = index_pos[:batch_size], index_neg[:batch_size]
 
             # Forward pass
-            logp_finetune_pos = finetune.prob(mask, embed, token, index);
-            logp_finetune_neg = finetune.prob(mask, embed, token, index);
+            logp_finetune_pos = finetune.prob(mask_pos, embed_pos, token_pos, index_pos)
+            logp_finetune_neg = finetune.prob(mask_neg, embed_neg, token_neg, index_neg)
             with torch.no_grad():
-                logp_baseline_pos = baseline.prob(mask, embed, token, index);
-                logp_baseline_neg = baseline.prob(mask, embed, token, index);
-            s_pos = logp_finetune_pos  - logp_baseline_pos
-            s_neg = logp_finetune_neg -  logp_baseline_neg
+                logp_baseline_pos = baseline.prob(
+                    mask_pos, embed_pos, token_pos, index_pos
+                )
+                logp_baseline_neg = baseline.prob(
+                    mask_neg, embed_neg, token_neg, index_neg
+                )
+            s_pos = logp_finetune_pos - logp_baseline_pos
+            s_neg = logp_finetune_neg - logp_baseline_neg
             margin = s_pos - s_neg
-            loss = f.softplus(-margin).mean()
+            loss = torch.nn.functional.softplus(-margin).mean()
 
             loss_value = loss.item()
 
@@ -178,7 +183,6 @@ def dpo(
             optimizer.step()
 
             # Progress tracking
-            batch_size = embed.size(0)
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix_str(
@@ -186,7 +190,7 @@ def dpo(
             )
 
             if callback:
-                callback(model=model, progress=progress, device=device)
+                callback(model=finetune, progress=progress, device=device)
 
             if count >= total:
                 break
