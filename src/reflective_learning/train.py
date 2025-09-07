@@ -125,23 +125,39 @@ def dpo(
         bar_format=bar_format,
         unit="sample",
     ) as progress:
-        for batch in loader:
+        for batch_a, batch_b in loader:
+            baseline.eval()
             finetune.train()
 
             # Move batch to device
-            mask = batch["mask"].to(device)  # [B, L]
-            embed = batch["embed"].to(device)  # [B, L, D]
-            token_label = batch["token"].to(device)  # [B, T]
-            state_label = batch["state"].to(device)  # [B]
-            index = batch["index"].to(device)  # [B]
+            mask_a, mask_b = (
+                batch_a["mask"].to(device),
+                batch_b["mask"].to(device),
+            )  # [B, L]
+            embed_a, embed_b = (
+                batch_a["embed"].to(device),
+                batch_b["embed"].to(device),
+            )  # [B, L, D]
+            token_label_a, token_label_b = (
+                batch_a["token"].to(device),
+                batch_b["token"].to(device),
+            )  # [B, T]
+            state_label_a, state_label_b = (
+                batch_a["state"].to(device),
+                batch_b["state"].to(device),
+            )  # [B]
+            index_a, index_b = (
+                batch_a["index"].to(device),
+                batch_b["index"].to(device),
+            )  # [B]
 
-            if count + embed.size(0) > total:
+            if count + embed_a.size(0) > total:
                 chunk = total - count
-                mask = mask[:chunk]
-                embed = embed[:chunk]
-                token_label = token_label[:chunk]
-                state_label = state_label[:chunk]
-                index = index[:chunk]
+                mask_a, mask_b = mask_a[:chunk], mask_b[:chunk]
+                embed_a, embed_b = embed_a[:chunk], embed_b[:chunk]
+                token_label_a, token_label_b = token_label[:chunk]
+                state_label_a, state_label_b = state_label[:chunk]
+                index_a, index_b = index_a[:chunk], index_b[:chunk]
 
             # Forward pass (model returns [B, L, V])
             logit = model[choice].call(mask=mask, embed=embed)  # [B, L, V]
