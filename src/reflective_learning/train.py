@@ -125,48 +125,51 @@ def dpo(
         bar_format=bar_format,
         unit="sample",
     ) as progress:
-        for batch_a, batch_b in loader:
+        for batch_pos, batch_neg in loader:
             baseline.eval()
             finetune.train()
 
             # Move batch to device
-            mask_a, mask_b = (
-                batch_a["mask"].to(device),
-                batch_b["mask"].to(device),
+            mask_pos, mask_neg = (
+                batch_pos["mask"].to(device),
+                batch_neg["mask"].to(device),
             )  # [B, L]
-            embed_a, embed_b = (
-                batch_a["embed"].to(device),
-                batch_b["embed"].to(device),
+            embed_pos, embed_neg = (
+                batch_pos["embed"].to(device),
+                batch_neg["embed"].to(device),
             )  # [B, L, D]
-            token_label_a, token_label_b = (
-                batch_a["token"].to(device),
-                batch_b["token"].to(device),
+            token_pos, token_neg = (
+                batch_pos["token"].to(device),
+                batch_neg["token"].to(device),
             )  # [B, T]
-            state_label_a, state_label_b = (
-                batch_a["state"].to(device),
-                batch_b["state"].to(device),
+            state_pos, state_neg = (
+                batch_pos["state"].to(device),
+                batch_neg["state"].to(device),
             )  # [B]
-            index_a, index_b = (
-                batch_a["index"].to(device),
-                batch_b["index"].to(device),
+            index_pos, index_neg = (
+                batch_pos["index"].to(device),
+                batch_neg["index"].to(device),
             )  # [B]
 
-            if count + embed_a.size(0) > total:
+            if count + embed_pos.size(0) > total:
                 chunk = total - count
-                mask_a, mask_b = mask_a[:chunk], mask_b[:chunk]
-                embed_a, embed_b = embed_a[:chunk], embed_b[:chunk]
-                token_label_a, token_label_b = token_label[:chunk]
-                state_label_a, state_label_b = state_label[:chunk]
-                index_a, index_b = index_a[:chunk], index_b[:chunk]
+                mask_pos, mask_neg = mask_pos[:chunk], mask_neg[:chunk]
+                embed_pos, embed_neg = embed_pos[:chunk], embed_neg[:chunk]
+                token_pos, token_neg = token_pos[:chunk], token_neg[:chunk]
+                state_pos, state_neg = state_pos[:chunk], state_neg[:chunk]
+                index_pos, index_neg = index_pos[:chunk], index_neg[:chunk]
 
-            # Forward pass (model returns [B, L, V])
-            logit = model[choice].call(mask=mask, embed=embed)  # [B, L, V]
-            loss = model[choice].loss(
-                logit=logit,
-                token=token_label,
-                index=index,
-                mask=mask,
-            )
+            # Forward pass
+            logp_finetune_pos = finetune.prob(mask, embed, token, index);
+            logp_finetune_neg = finetune.prob(mask, embed, token, index);
+            with torch.no_grad():
+                logp_baseline_pos = baseline.prob(mask, embed, token, index);
+                logp_baseline_neg = baseline.prob(mask, embed, token, index);
+            s_pos = logp_finetune_pos  - logp_baseline_pos
+            s_neg = logp_finetune_neg -  logp_baseline_neg
+            margin = s_pos - s_neg
+            loss = f.softplus(-margin).mean()
+
             loss_value = loss.item()
 
             # Backpropagation
