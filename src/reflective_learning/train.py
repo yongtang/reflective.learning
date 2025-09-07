@@ -52,23 +52,23 @@ def train(
             # Move batch to device
             mask = batch["mask"].to(device)  # [B, L]
             embed = batch["embed"].to(device)  # [B, L, D]
-            token_label = batch["token"].to(device)  # [B, T]
-            state_label = batch["state"].to(device)  # [B]
+            token = batch["token"].to(device)  # [B, T]
+            state = batch["state"].to(device)  # [B]
             index = batch["index"].to(device)  # [B]
 
             if count + embed.size(0) > total:
                 chunk = total - count
                 mask = mask[:chunk]
                 embed = embed[:chunk]
-                token_label = token_label[:chunk]
-                state_label = state_label[:chunk]
+                token = token[:chunk]
+                state = state[:chunk]
                 index = index[:chunk]
 
             # Forward pass (model returns [B, L, V])
             logit = model.call(mask=mask, embed=embed)  # [B, L, V]
             loss = model.loss(
                 logit=logit,
-                token=token_label,
+                token=token,
                 index=index,
                 mask=mask,
             )
