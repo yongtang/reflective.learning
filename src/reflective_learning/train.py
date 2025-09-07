@@ -56,13 +56,14 @@ def train(
             state = batch["state"].to(device)  # [B]
             index = batch["index"].to(device)  # [B]
 
-            if count + embed.size(0) > total:
-                chunk = total - count
-                mask = mask[:chunk]
-                embed = embed[:chunk]
-                token = token[:chunk]
-                state = state[:chunk]
-                index = index[:chunk]
+            batch_size = embed.size(0)
+            if count + batch_size > total:
+                batch_size = total - count
+                mask = mask[:batch_size]
+                embed = embed[:batch_size]
+                token = token[:batch_size]
+                state = state[:batch_size]
+                index = index[:batch_size]
 
             # Forward pass (model returns [B, L, V])
             logit = model.call(mask=mask, embed=embed)  # [B, L, V]
@@ -80,7 +81,6 @@ def train(
             optimizer.step()
 
             # Progress tracking
-            batch_size = embed.size(0)
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix_str(
