@@ -3,7 +3,7 @@ from typing import Callable, Optional
 import torch
 from tqdm import tqdm
 
-from reflective_learning.model import ReflectiveCore
+from reflective_learning.model import autocast, ReflectiveCore
 
 
 def train(
@@ -66,13 +66,14 @@ def train(
                 index = index[:batch_size]
 
             # Forward pass (model returns [B, L, V])
-            logit = model.call(mask=mask, embed=embed)  # [B, L, V]
-            loss = model.loss(
-                logit=logit,
-                token=token,
-                index=index,
-                mask=mask,
-            )
+            with autocast():
+                logit = model.call(mask=mask, embed=embed)  # [B, L, V]
+                loss = model.loss(
+                    logit=logit,
+                    token=token,
+                    index=index,
+                    mask=mask,
+                )
             loss_value = loss.item()
 
             # Backpropagation
@@ -161,19 +162,24 @@ def dpo(
                 index_pos, index_neg = index_pos[:batch_size], index_neg[:batch_size]
 
             # Forward pass
-            logp_finetune_pos = finetune.prob(mask_pos, embed_pos, token_pos, index_pos)
-            logp_finetune_neg = finetune.prob(mask_neg, embed_neg, token_neg, index_neg)
-            with torch.no_grad():
-                logp_baseline_pos = baseline.prob(
+            with autocast():
+                logp_finetune_pos = finetune.prob(
                     mask_pos, embed_pos, token_pos, index_pos
                 )
-                logp_baseline_neg = baseline.prob(
+                logp_finetune_neg = finetune.prob(
                     mask_neg, embed_neg, token_neg, index_neg
                 )
-            s_pos = logp_finetune_pos - logp_baseline_pos
-            s_neg = logp_finetune_neg - logp_baseline_neg
-            margin = s_pos - s_neg
-            loss = torch.nn.functional.softplus(-margin).mean()
+                with torch.no_grad():
+                    logp_baseline_pos = baseline.prob(
+                        mask_pos, embed_pos, token_pos, index_pos
+                    )
+                    logp_baseline_neg = baseline.prob(
+                        mask_neg, embed_neg, token_neg, index_neg
+                    )
+                s_pos = logp_finetune_pos - logp_baseline_pos
+                s_neg = logp_finetune_neg - logp_baseline_neg
+                margin = s_pos - s_neg
+                loss = torch.nn.functional.softplus(-margin).mean()
 
             loss_value = loss.item()
 

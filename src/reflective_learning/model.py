@@ -1,6 +1,20 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import contextlib
+
+
+@contextlib.contextmanager
+def autocast():
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            yield
+    else:
+        try:
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                yield
+        except RuntimeError:
+            yield  # Fallback fp32
 
 
 class ReflectiveCore(nn.Module):
