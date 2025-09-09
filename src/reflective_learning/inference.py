@@ -23,6 +23,7 @@ def sequence(
         Tensor: [T] of generated token indices.
     """
     for e in model:
+        e.to(device)
         e.eval()
     with torch.no_grad():
         prefix = prefix.to(dtype=torch.float32, device=device)
@@ -85,6 +86,7 @@ def explore(
     """
     # Put each sub-model into eval mode (we iterate the container directly).
     for e in model:
+        e.to(device)
         e.eval()
 
     with torch.no_grad():
