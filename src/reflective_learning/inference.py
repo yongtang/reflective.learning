@@ -1,8 +1,6 @@
-import contextlib
-
 import torch
 
-from .model import autocast
+from reflective_learning.model import autocast
 
 
 def sequence(

@@ -1,18 +1,16 @@
-from typing import Callable, Optional
-
 import torch
 from tqdm import tqdm
 
-from reflective_learning.model import ReflectiveCore, autocast
+from reflective_learning.model import autocast
 
 
 def train(
-    model: ReflectiveCore,
-    loader: torch.utils.data.DataLoader,
-    optimizer: torch.optim.Optimizer,
-    total: int,
-    callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
-    device: Optional[torch.device] = None,
+    model,
+    loader,
+    optimizer,
+    total,
+    callback,
+    device=None,
 ):
     """
     Trains the model using a streaming loader
@@ -50,11 +48,11 @@ def train(
             model.train()
 
             # Move batch to device
-            mask = batch["mask"].to(device)  # [B, L]
-            embed = batch["embed"].to(device)  # [B, L, D]
-            token = batch["token"].to(device)  # [B, T]
-            state = batch["state"].to(device)  # [B]
-            index = batch["index"].to(device)  # [B]
+            mask = batch["mask"].to(device, non_blocking=True)  # [B, L]
+            embed = batch["embed"].to(device, non_blocking=True)  # [B, L, D]
+            token = batch["token"].to(device, non_blocking=True)  # [B, T]
+            state = batch["state"].to(device, non_blocking=True)  # [B]
+            index = batch["index"].to(device, non_blocking=True)  # [B]
 
             batch_size = embed.size(0)
             if count + batch_size > total:
@@ -69,7 +67,7 @@ def train(
             with autocast():
                 logit = model.call(mask=mask, embed=embed)  # [B, L, V]
                 loss = model.loss(
-                    logit=logit,
+                    logit=logit.float(),  # keep loss math in fp32 under autocast
                     token=token,
                     index=index,
                     mask=mask,
@@ -77,7 +75,7 @@ def train(
             loss_value = loss.item()
 
             # Backpropagation
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
 
@@ -96,13 +94,13 @@ def train(
 
 
 def dpo(
-    baseline: ReflectiveCore,
-    finetune: ReflectiveCore,
-    loader: torch.utils.data.DataLoader,
-    optimizer: torch.optim.Optimizer,
-    total: int,
-    callback: Callable[[ReflectiveCore, tqdm, torch.device], None],
-    device: Optional[torch.device] = None,
+    baseline,
+    finetune,
+    loader,
+    optimizer,
+    total,
+    callback,
+    device=None,
 ):
 
     loss_width = 10
@@ -132,24 +130,24 @@ def dpo(
 
             # Move batch to device
             mask_pos, mask_neg = (
-                batch_pos["mask"].to(device),
-                batch_neg["mask"].to(device),
+                batch_pos["mask"].to(device, non_blocking=True),
+                batch_neg["mask"].to(device, non_blocking=True),
             )  # [B, L]
             embed_pos, embed_neg = (
-                batch_pos["embed"].to(device),
-                batch_neg["embed"].to(device),
+                batch_pos["embed"].to(device, non_blocking=True),
+                batch_neg["embed"].to(device, non_blocking=True),
             )  # [B, L, D]
             token_pos, token_neg = (
-                batch_pos["token"].to(device),
-                batch_neg["token"].to(device),
+                batch_pos["token"].to(device, non_blocking=True),
+                batch_neg["token"].to(device, non_blocking=True),
             )  # [B, T]
             state_pos, state_neg = (
-                batch_pos["state"].to(device),
-                batch_neg["state"].to(device),
+                batch_pos["state"].to(device, non_blocking=True),
+                batch_neg["state"].to(device, non_blocking=True),
             )  # [B]
             index_pos, index_neg = (
-                batch_pos["index"].to(device),
-                batch_neg["index"].to(device),
+                batch_pos["index"].to(device, non_blocking=True),
+                batch_neg["index"].to(device, non_blocking=True),
             )  # [B]
 
             batch_size = embed_pos.size(0)
@@ -184,7 +182,7 @@ def dpo(
             loss_value = loss.item()
 
             # Backpropagation
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
 

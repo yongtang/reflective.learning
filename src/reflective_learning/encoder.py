@@ -5,7 +5,7 @@ import PIL.ImageOps
 import torch
 from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
 
-from .model import autocast
+from reflective_learning.model import autocast
 
 
 class ContextEncoder:
