@@ -1,4 +1,8 @@
+import contextlib
+
 import torch
+
+from .model import autocast
 
 
 def sequence(
@@ -7,6 +11,7 @@ def sequence(
     prefix: torch.Tensor,  # [C, D]
     maximum: int,
     device: torch.device,
+    generator: torch.Generator | None = None,  # optional reproducibility
 ) -> torch.Tensor:
     """
     Generate a single token sequence using a fixed prefix and sampling.
@@ -22,24 +27,42 @@ def sequence(
     Returns:
         Tensor: [T] of generated token indices.
     """
+    # materialize in case it's a generator; keep name 'model'
+    model = list(model)
     for e in model:
         e.to(device)
         e.eval()
-    with torch.no_grad():
+
+    with torch.inference_mode():
         prefix = prefix.to(dtype=torch.float32, device=device)
-        token = torch.empty([0], dtype=torch.long, device=device)  # [T]
+        # preallocate to avoid O(n^2) concatenation; track logical length
+        token = torch.empty(maximum, dtype=torch.long, device=device)  # [maximum]
+        length = 0
 
         for _ in range(maximum):
-            logit = tuple(e.forward(token, prefix) for e in model)  # M x [V]
-            logit = reduce(logit)  # [V]
-            probs = torch.softmax(logit, dim=0)  # [V]
-            prediction = torch.multinomial(probs, num_samples=1)  # [1]
-            token = torch.cat([token, prediction], dim=0)  # [T+1]
+            data = token[:length]  # current sequence view
+
+            # run model forwards under autocast; keep softmax math in fp32
+            with autocast():
+                logit = tuple(e.forward(data, prefix) for e in model)  # M x [V]
+            logit = reduce(logit).float()  # [V]
+
+            # guard against NaN/Inf for this step only
+            if not torch.isfinite(logit).all():
+                probs = torch.full_like(logit, 1.0 / logit.numel())
+            else:
+                probs = torch.softmax(logit, dim=0)  # [V]
+
+            prediction = torch.multinomial(
+                probs, num_samples=1, generator=generator
+            )  # [1]
+            token[length] = prediction.item()
+            length += 1
 
             if prediction.item() == 0:
                 break
 
-        return token  # [T]
+        return token[:length]  # [T]
 
 
 def explore(
@@ -47,6 +70,7 @@ def explore(
     prefix: torch.Tensor,  # [C, D]
     maximum: int,
     device: torch.device,
+    generator: torch.Generator | None = None,  # optional reproducibility
 ) -> torch.Tensor:
     """
     Generate a single token sequence using a fixed prefix and stochastic sampling.
@@ -84,24 +108,31 @@ def explore(
     Returns:
         Tensor: [T] of generated token indices (T <= maximum), possibly including STOP (0).
     """
+    # materialize in case it's a generator; keep name 'model'
+    model = list(model)
     # Put each sub-model into eval mode (we iterate the container directly).
     for e in model:
         e.to(device)
         e.eval()
 
-    with torch.no_grad():
+    with torch.inference_mode():
         prefix = prefix.to(dtype=torch.float32, device=device)
-        token = torch.empty([0], dtype=torch.long, device=device)  # [T]
+        # preallocate to avoid O(n^2) concatenation; track logical length
+        token = torch.empty(maximum, dtype=torch.long, device=device)  # [maximum]
+        length = 0
 
         # Cumulative log-likelihood per model over tokens emitted so far.
         # Initialized to zeros -> uniform prior up to a constant (which cancels in softmax).
         S = torch.zeros(len(model), device=device)
 
         for _ in range(maximum):
+            data = token[:length]
+
             # Collect next-token logits from each model independently: shape [M, V].
-            logit = torch.stack(
-                [e.forward(token, prefix) for e in model], dim=0
-            )  # [M, V]
+            with autocast():
+                logit = torch.stack(
+                    [e.forward(data, prefix) for e in model], dim=0
+                )  # [M, V]
 
             # Bayes-balanced mixing weights:
             #   weight_k proportional to exp(-S_k)  =>  weight = softmax(-S)
@@ -117,8 +148,11 @@ def explore(
             else:
                 probs = torch.softmax(mixed, dim=0)  # [V]
 
-            prediction = torch.multinomial(probs, num_samples=1)  # [1]
-            token = torch.cat([token, prediction], dim=0)  # [T+1]
+            prediction = torch.multinomial(
+                probs, num_samples=1, generator=generator
+            )  # [1]
+            token[length] = prediction.item()
+            length += 1
 
             # Update S_k with the log-prob each model assigned to the single sampled token.
             # log_softmax(logit)[k, prediction] selects the same token column for all models.
@@ -133,4 +167,4 @@ def explore(
             if prediction.item() == 0:
                 break
 
-        return token  # [T]
+        return token[:length]
