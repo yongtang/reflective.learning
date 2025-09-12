@@ -106,14 +106,18 @@ class ReflectiveCore(nn.Module):
         B, T, D = embed.shape
 
         # Positional embedding
-        pos = torch.arange(T, device=embed.device).unsqueeze(0).expand(B, T)
+        pos = (
+            torch.arange(T, device=embed.device, dtype=torch.long)
+            .unsqueeze(0)
+            .expand(B, T)
+        )
         value = embed + self.pos_embedding(pos)  # [B, T, D]
 
         # Padding mask: [B, T], True = PAD — so invert `mask`
         src_key_padding_mask = ~mask  # [B, T]
 
         # Causal mask: [T, T], True = masked
-        mask = torch.triu(torch.ones(T, T, device=embed.device), diagonal=1).bool()
+        mask = torch.triu(embed.new_ones((T, T), dtype=torch.bool), diagonal=1)
 
         # Transformer: decoder-only via TransformerEncoder + causal mask
         value = self.decoder(
@@ -181,6 +185,7 @@ class ReflectiveCore(nn.Module):
         # Average over valid tokens
         return loss_flat.sum() / valid.sum().clamp(min=1).float()
 
+    @torch.inference_mode()
     def prob(self, mask, embed, token, index):
         """
         Compute length-normalized sequence log-probabilities log P(y | x) in batch,
@@ -266,9 +271,9 @@ class ReflectiveCore(nn.Module):
         index_list = []
 
         for entry in batch:
-            prefix = entry["prefix"].to(device)  # [C, D]
-            token = entry["token"].to(device)  # [T]
-            state = entry["state"].to(device)  # []
+            prefix = entry["prefix"].to(device, non_blocking=True)  # [C, D]
+            token = entry["token"].to(device, non_blocking=True)  # [T]
+            state = entry["state"].to(device, non_blocking=True)  # []
 
             T = token.size(0)
             assert T > 0, "Token sequence must have at least 1 token"
