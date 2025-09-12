@@ -3,7 +3,7 @@ from typing import Callable, Optional
 import torch
 from tqdm import tqdm
 
-from reflective_learning.model import autocast, ReflectiveCore
+from reflective_learning.model import ReflectiveCore, autocast
 
 
 def train(

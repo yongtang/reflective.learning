@@ -1,25 +1,28 @@
 import functools
 
 import PIL.Image
+import PIL.ImageOps
 import torch
 from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
+
+from . import model
 
 
 class ContextEncoder:
     def __init__(
-        self, text_model, image_model, tokenizer, image_processor, device="cpu"
+        self, text_model, image_model, text_tokenizer, image_processor, device="cpu"
     ):
         assert text_model is not None, "text_model is required"
         assert image_model is not None, "image_model is required"
-        assert tokenizer is not None, "tokenizer is required"
+        assert text_tokenizer is not None, "text_tokenizer is required"
         assert image_processor is not None, "image_processor is required"
         assert text_model.config.hidden_size == image_model.config.hidden_size
 
-        self.text_model = text_model.to(device)
-        self.image_model = image_model.to(device)
-        self.tokenizer = tokenizer
+        self.device = torch.device(device)
+        self.text_model = text_model.to(self.device).eval()
+        self.image_model = image_model.to(self.device).eval()
+        self.text_tokenizer = text_tokenizer
         self.image_processor = image_processor
-        self.device = device
 
     @classmethod
     def from_pretrained(cls, info, device="cpu"):
@@ -29,7 +32,7 @@ class ContextEncoder:
         text_model = AutoModel.from_pretrained(
             info["text"]["model"], revision=info["text"]["revision"]
         )
-        tokenizer = AutoTokenizer.from_pretrained(
+        text_tokenizer = AutoTokenizer.from_pretrained(
             info["text"]["model"], revision=info["text"]["revision"]
         )
         image_model = AutoModel.from_pretrained(
@@ -39,25 +42,34 @@ class ContextEncoder:
             info["image"]["model"], revision=info["image"]["revision"], use_fast=True
         )
 
-        return cls(text_model, image_model, tokenizer, image_processor, device=device)
+        return cls(
+            text_model=text_model,
+            image_model=image_model,
+            text_tokenizer=text_tokenizer,
+            image_processor=image_processor,
+            device=device,
+        )
 
     @functools.lru_cache(maxsize=1024)
     def encode_text_embed(self, text: str) -> torch.Tensor:
-        inputs = self.tokenizer(text, return_tensors="pt", truncation=True)
-        input_ids = inputs["input_ids"].to(self.device)
-        with torch.no_grad():
+        inputs = self.text_tokenizer(text, return_tensors="pt", truncation=True)
+        input_ids = inputs["input_ids"].to(self.device, non_blocking=True)
+        with torch.inference_mode(), autocast():  # your helper
             output = self.text_model(input_ids=input_ids)
-            return output.last_hidden_state.squeeze(0).detach().cpu()
+            # CPU float32 output, consistent regardless of autocast
+            return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
 
     @functools.lru_cache(maxsize=1024)
     def encode_image_embed(self, image_path: str) -> torch.Tensor:
-        image = PIL.Image.open(image_path).convert("RGB")
+        with PIL.Image.open(image_path) as f:
+            image = PIL.ImageOps.exif_transpose(f).convert("RGB")
         pixel_values = self.image_processor(
             images=image, return_tensors="pt"
-        ).pixel_values.to(self.device)
-        with torch.no_grad():
+        ).pixel_values.to(self.device, non_blocking=True)
+        with torch.inference_mode(), autocast():  # your helper
             output = self.image_model(pixel_values=pixel_values)
-            return output.last_hidden_state.squeeze(0).detach().cpu()
+            # CPU float32 output, consistent regardless of autocast
+            return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
 
     def encode_embed(
         self, text: list[torch.Tensor], image: list[torch.Tensor]
@@ -78,9 +90,6 @@ class ContextEncoder:
         return torch.cat(segments, dim=0)
 
     def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
-
         text = list(self.encode_text_embed(chunk) for chunk in text)
-
         image = list(self.encode_image_embed(chunk) for chunk in image)
-
         return self.encode_embed(text, image)
