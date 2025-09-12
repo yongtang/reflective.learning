@@ -387,10 +387,14 @@ def f_callback(
     save[choice] = model.state_dict()
 
     # save model
-    torch.save(
-        save,
-        os.path.join(data, f"model.pt"),
-    )
+    with tempfile.NamedTemporaryFile(
+        dir=data, prefix="model.", suffix=".pt", delete=False
+    ) as f:
+        torch.save(save, f)
+        f.flush()
+        os.fsync(f.fileno())
+        fname = f.name
+    os.replace(fname, os.path.join(data, "model.pt"))
 
     progress._meta_index_ += interval
 
