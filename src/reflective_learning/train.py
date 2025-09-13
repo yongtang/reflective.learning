@@ -161,12 +161,15 @@ def dpo(
 
             # Forward pass
             with autocast():
+                # Trainable model: grads ON
                 logp_finetune_pos = finetune.prob(
                     mask_pos, embed_pos, token_pos, index_pos
                 )
                 logp_finetune_neg = finetune.prob(
                     mask_neg, embed_neg, token_neg, index_neg
                 )
+
+                # Reference model: grads OFF + eval()
                 with torch.no_grad():
                     logp_baseline_pos = baseline.prob(
                         mask_pos, embed_pos, token_pos, index_pos
@@ -174,6 +177,8 @@ def dpo(
                     logp_baseline_neg = baseline.prob(
                         mask_neg, embed_neg, token_neg, index_neg
                     )
+
+                # DPO margin (no temperature)
                 s_pos = logp_finetune_pos - logp_baseline_pos
                 s_neg = logp_finetune_neg - logp_baseline_neg
                 margin = s_pos - s_neg

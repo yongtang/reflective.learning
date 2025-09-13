@@ -185,10 +185,9 @@ class ReflectiveCore(nn.Module):
         # Average over valid tokens
         return loss_flat.sum() / valid.sum().clamp(min=1).float()
 
-    @torch.inference_mode()
     def prob(self, mask, embed, token, index):
         """
-        Compute length-normalized sequence log-probabilities log P(y | x) in batch,
+        Compute sequence log-probabilities log P(y | x) in batch,
         leveraging collate() outputs.
 
         Args:
@@ -198,17 +197,17 @@ class ReflectiveCore(nn.Module):
             index: [B]       from collate() (position of token[0] in input)
 
         Returns:
-            logprob:  [B] length-normalized log-probability of each sequence
+            logprob:  [B] sum log-probability of each sequence
 
         Equations (ASCII):
             For each sequence b and step t (target token y_{b,t} at position pos_{b,t}):
                 logits_{b,t} = model(x_b)[pos_{b,t}, :]
                 logZ_{b,t}   = logsumexp(logits_{b,t})
-                logp_{b,t}   = logits_{b,t}[y_{b,t}] - logZ_{b,t}
+                logp_{b,t}   = logits_{b,t}[y_{b,t}] - logZ_{b,t]
 
             Let valid_{b,t} ∈ {0,1} indicate whether this step is inside the sequence.
-            Length-normalized sequence score:
-                logP_b = ( Σ_t valid_{b,t} * logp_{b,t} ) / ( Σ_t valid_{b,t} + 1e-9 )
+            Sequence score (sum over valid steps):
+                logP_b = sum_t valid_{b,t} * logp_{b,t}
         """
         # Run the transformer to get logits at every position
         logit = self.call(mask=mask, embed=embed)  # [B, L, V]
@@ -221,12 +220,8 @@ class ReflectiveCore(nn.Module):
         position = start + I  # [B, T] positions in logits
 
         # Mark valid positions: inside sequence length and not padding
-        valid = (
-            (position >= 0)
-            & ((position + 1) < L)
-            & mask.gather(1, (position + 1).clamp(0, L - 1))
-        )
-        position = position.clamp(0, L - 1)  # ensure positions are in range
+        valid = (position >= 0) & ((position + 1) < L) & mask.gather(1, (position + 1))
+        # position = position.clamp(0, L - 1)  # ensure positions are in range
 
         # Gather logits for each token prediction step
         step = logit.gather(1, position.unsqueeze(-1).expand(B, T, V))  # [B, T, V]
@@ -240,11 +235,8 @@ class ReflectiveCore(nn.Module):
         # Zero-out invalid positions
         logp = logp * valid.float()
 
-        # Compute sequence lengths strictly from 'valid' steps
-        lengths = valid.sum(dim=1).float()  # [B]
-
-        # Length-normalized total log-probability per sequence (add epsilon)
-        return logp.sum(dim=1) / (lengths + 1e-9)  # [B]
+        # Return SUM of valid token log-probabilities per sequence
+        return logp.sum(dim=1)  # [B]
 
     def collate(self, batch):
         """
