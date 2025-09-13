@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from reflective_learning.encoder import ContextEncoder
 from reflective_learning.inference import explore, sequence
+from reflective_learning.launch import launch
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import dpo, train
 
@@ -1115,6 +1116,11 @@ def main():
     play_parser.add_argument("--facing", choices=facing_space, required=True)
     play_parser.add_argument("--device")
 
+    # ---- launch mode ----
+    launch_parser = subparsers.add_parser("launch", help="Launch mode")
+    launch_parser.add_argument("--data", required=True)
+    launch_parser.add_argument("--device")
+
     args = parser.parse_args()
     print(f"Load args: {json.dumps(vars(args), sort_keys=True)}")
 
@@ -1181,6 +1187,9 @@ def main():
             model=args.model,
             device=args.device,
         )
+
+    elif args.mode == "launch":
+        launch(data=args.data, device=args.device)
 
     else:
         assert False, f"Unhandled mode: {args.mode}"

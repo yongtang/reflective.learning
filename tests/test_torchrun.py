@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 
@@ -6,39 +7,45 @@ import torch
 
 
 @pytest.mark.parametrize(
-    "device, remote",
+    "device",
     [
         pytest.param(
             "cpu",
-            [],
-            id="cpu/local",
         ),
         pytest.param(
             "cuda",
-            [],
-            id="cuda/local",
-            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA"),
-        ),
-        pytest.param(
-            "cuda",
-            ["127.0.0.1:10061", "127.0.0.1:10062"],
-            id="cuda/remote",
             marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA"),
         ),
     ],
 )
-def test_torchrun(device, remote):
+def test_torchrun(monkeypatch, tmp_path, device):
+    monkeypatch.setenv("PYTHONPATH", "src")
 
-    node = [sys.executable, "-m", "torch.distributed.run", "--help"]
+    node = [
+        sys.executable,
+        "-m",
+        "reflective_learning.tools.mini",
+        "launch",
+        "--data",
+        str(tmp_path),
+        "--device",
+        str(device),
+    ]
     proc = subprocess.run(
         node,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        timeout=60,
+        timeout=300,
     )
     print(f"\n==== {' '.join(node)} ====\n{proc.stdout}\n==== {' '.join(node)} ====")
+
     assert proc.returncode == 0, proc.stdout
-    assert ("usage" in proc.stdout) or (
-        "torch.distributed.run" in proc.stdout
-    ), proc.stdout
+
+    with open(os.path.join(tmp_path, "artifact.json"), "r") as f:
+        data = f.read()
+    print(
+        f"\n==== {os.path.join(tmp_path, 'artifact.json')} ====\n{data}\n==== {os.path.join(tmp_path, 'artifact.json')} ===="
+    )
+    assert "loss_mean" in data, data
+    assert '"world_size": 2, "device": "cpu"' in data, data
