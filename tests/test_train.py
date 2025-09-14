@@ -49,7 +49,7 @@ def test_train_sanity():
 
     tmpdir = tempfile.mkdtemp()
 
-    def f_callback(model, progress, device):
+    def f_callback(model, progress, device, rank):
         with open(os.path.join(tmpdir, "model.pt"), "w") as f:
             pass
 

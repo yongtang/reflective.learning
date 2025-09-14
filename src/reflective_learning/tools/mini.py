@@ -358,10 +358,30 @@ def f_callback(
     data,
     choice,
     interval,
+    distributed,
     model,
     progress,
     device,
+    rank,
 ):
+    if rank != 0:
+        return
+    model = (
+        model.module
+        if (
+            distributed
+            and isinstance(
+                model,
+                (
+                    torch.nn.parallel.DataParallel,
+                    torch.nn.parallel.DistributedDataParallel,
+                    torch.distributed.fsdp.FullyShardedDataParallel,
+                ),
+            )
+        )
+        else model
+    )
+
     if not hasattr(progress, "_meta_index_"):
         progress._meta_index_ = 0
 
@@ -785,13 +805,52 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
         data=data,
     ) as dataset:
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        distributed = False
+
+        collate_fn = model.collate
+
+        if not distributed:
+            rank = 0
+            model.to(device)
+            sampler = None
+        else:
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            device = (
+                torch.device(f"cuda:{local_rank}")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
+
+            # move & wrap in DDP
+            model.to(device)
+            if device.type == "cuda":
+                model = torch.nn.parallel.DistributedDataParallel(
+                    model, device_ids=[device.index], output_device=device.index
+                )
+            else:
+                model = torch.nn.parallel.DistributedDataParallel(model)
+
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset, num_replicas=world_size, rank=rank, shuffle=True
+            )
+
+            # keep per-rank cap consistent with shard size (optional but safe)
+            total = min(total, len(sampler))
+
+            # if loop epochs, call this each epoch with the epoch number
+            sampler.set_epoch(0)
 
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch,
-            collate_fn=model.collate,
+            collate_fn=collate_fn,  # use captured collate
+            sampler=sampler,
+            shuffle=False,
+            drop_last=False,
         )
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         train(
             model=model,
             loader=loader,
@@ -802,8 +861,10 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
                 data=data,
                 choice=choice,
                 interval=interval,
+                distributed=distributed,
             ),
             device=device,
+            rank=rank,
         )
 
 
@@ -1000,15 +1061,56 @@ def run_finetune(data, image, total, batch, interval, lr, device):
         ),
         data=data,
     ) as dataset:
+        distributed = False
 
-        optimizer = torch.optim.Adam(finetune.parameters(), lr=lr)
+        # capture collate before any DDP wrapping
+        collate_fn = finetune.collate
+
+        if not distributed:
+            rank = 0
+            baseline.to(device)
+            finetune.to(device)
+            sampler = None
+        else:
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            device = (
+                torch.device(f"cuda:{local_rank}")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
+
+            # move & wrap finetune in DDP; baseline can stay as-is (eval/no grad), or also be wrapped if you wish
+            baseline.to(device)
+            finetune.to(device)
+            if device.type == "cuda":
+                finetune = torch.nn.parallel.DistributedDataParallel(
+                    finetune, device_ids=[device.index], output_device=device.index
+                )
+            else:
+                finetune = torch.nn.parallel.DistributedDataParallel(finetune)
+
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset, num_replicas=world_size, rank=rank, shuffle=True
+            )
+
+            # optional: cap per-rank total to shard size
+            total = min(total, len(sampler))
+            # if you loop epochs, call this each epoch
+            sampler.set_epoch(0)
 
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch,
-            collate_fn=lambda batch: tuple(map(finetune.collate, zip(*batch))),
+            collate_fn=lambda batch: tuple(
+                map(collate_fn, zip(*batch))
+            ),  # use captured collate
+            sampler=sampler,
+            shuffle=False,
+            drop_last=False,
         )
-
+        optimizer = torch.optim.Adam(finetune.parameters(), lr=lr)
         dpo(
             baseline=baseline,
             finetune=finetune,
@@ -1020,8 +1122,10 @@ def run_finetune(data, image, total, batch, interval, lr, device):
                 data=data,
                 choice=choice,
                 interval=interval,
+                distributed=distributed,
             ),
             device=device,
+            rank=rank,
         )
 
 

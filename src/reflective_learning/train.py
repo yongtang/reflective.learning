@@ -10,7 +10,8 @@ def train(
     optimizer,
     total,
     callback,
-    device=None,
+    device,
+    rank: int = 0,
 ):
     """
     Trains the model using a streaming loader
@@ -21,7 +22,9 @@ def train(
         optimizer: Optimizer for updating model parameters.
         total: Total number of training samples to process.
         callback: A function called periodically during training.
-        device: Optional device override (defaults to CUDA if available).
+        device: Device for this rank (required). Model is assumed already on this device
+                and may already be wrapped in DistributedDataParallel by the caller.
+        rank: Optional global rank used only to disable tqdm on nonzero ranks.
     """
 
     loss_width = 10
@@ -32,9 +35,6 @@ def train(
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
-    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-
     count = 0
 
     with tqdm(
@@ -43,6 +43,7 @@ def train(
         dynamic_ncols=True,
         bar_format=bar_format,
         unit="sample",
+        disable=(rank != 0),  # only rank 0 renders the bar; others are no-ops
     ) as progress:
         for batch in loader:
             model.train()
@@ -74,12 +75,12 @@ def train(
                 )
             loss_value = loss.item()
 
-            # Backpropagation
+            # Backpropagation (DDP grad sync happens automatically if model is wrapped)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
 
-            # Progress tracking
+            # Progress tracking (safe to call on all ranks; disabled bars ignore updates)
             count += batch_size
             progress.update(batch_size)
             progress.set_postfix_str(
@@ -87,7 +88,8 @@ def train(
             )
 
             if callback:
-                callback(model=model, progress=progress, device=device)
+                # Let the callback decide how to handle DDP wrapping and rank in case.
+                callback(model=model, progress=progress, device=device, rank=rank)
 
             if count >= total:
                 break
@@ -100,7 +102,8 @@ def dpo(
     optimizer,
     total,
     callback,
-    device=None,
+    device,
+    rank: int = 0,
 ):
 
     loss_width = 10
@@ -111,10 +114,6 @@ def dpo(
         f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
     )
 
-    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    baseline.to(device)
-    finetune.to(device)
-
     count = 0
 
     with tqdm(
@@ -123,6 +122,7 @@ def dpo(
         dynamic_ncols=True,
         bar_format=bar_format,
         unit="sample",
+        disable=(rank != 0),  # only rank 0 renders; others ignore updates
     ) as progress:
         for batch_pos, batch_neg in loader:
             baseline.eval()
@@ -186,7 +186,7 @@ def dpo(
 
             loss_value = loss.item()
 
-            # Backpropagation
+            # Backpropagation (DDP grad sync happens automatically if finetune is wrapped)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
@@ -199,7 +199,8 @@ def dpo(
             )
 
             if callback:
-                callback(model=finetune, progress=progress, device=device)
+                # Let the callback decide DDP unwrapping and rank handling
+                callback(model=finetune, progress=progress, device=device, rank=rank)
 
             if count >= total:
                 break
