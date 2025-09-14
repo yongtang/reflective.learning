@@ -488,7 +488,7 @@ def f_dataset(file, choice):
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
-class LearnDataset(torch.utils.data.IterableDataset):
+class LearnDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, datum_fn, data):
         super().__init__()
         self.dataset = dataset
@@ -506,15 +506,17 @@ class LearnDataset(torch.utils.data.IterableDataset):
     def __exit__(self, exc_type, exc, tb):
         return self.stack.__exit__(exc_type, exc, tb)
 
-    def __iter__(self):
-        for entry in self.dataset:
-            offset, steps, file = entry
-            self.file[file].seek(offset)
-            line = self.file[file].readline()
-            yield self.datum_fn(entry=json.loads(line))
+    def __getitem__(self, index):
+        offset, steps, file = self.dataset[index]
+        self.file[file].seek(offset)
+        line = self.file[file].readline()
+        return self.datum_fn(entry=json.loads(line))
+
+    def __len__(self):
+        return len(self.dataset)
 
 
-class FinetuneDataset(torch.utils.data.IterableDataset):
+class FinetuneDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, datum_fn, data):
         super().__init__()
         self.dataset = dataset
@@ -532,17 +534,19 @@ class FinetuneDataset(torch.utils.data.IterableDataset):
     def __exit__(self, exc_type, exc, tb):
         return self.stack.__exit__(exc_type, exc, tb)
 
-    def __iter__(self):
-        for entry in self.dataset:
-            (offset_a, steps_a, file_a), (offset_b, steps_b, file_b) = entry
-            self.file[file_a].seek(offset_a)
-            line_a = self.file[file_a].readline()
-            self.file[file_b].seek(offset_b)
-            line_b = self.file[file_b].readline()
+    def __getitem__(self, index):
+        (offset_a, steps_a, file_a), (offset_b, steps_b, file_b) = self.dataset[index]
+        self.file[file_a].seek(offset_a)
+        line_a = self.file[file_a].readline()
+        self.file[file_b].seek(offset_b)
+        line_b = self.file[file_b].readline()
 
-            yield self.datum_fn(entry=json.loads(line_a)), self.datum_fn(
-                entry=json.loads(line_b)
-            )
+        return self.datum_fn(entry=json.loads(line_a)), self.datum_fn(
+            entry=json.loads(line_b)
+        )
+
+    def __len__(self):
+        return len(self.dataset)
 
 
 def f_learn(
@@ -566,7 +570,7 @@ def f_learn(
     model = f_model(info, model)
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    dataset = np.load(file, allow_pickle=False)
+    dataset = np.load(file, allow_pickle=True)
     with LearnDataset(
         dataset=dataset,
         datum_fn=functools.partial(
@@ -647,7 +651,7 @@ def f_finetune(
     finetune = f_model(info, finetune)
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    dataset = np.load(file, allow_pickle=False)
+    dataset = np.load(file, allow_pickle=True)
     with FinetuneDataset(
         dataset=dataset,
         datum_fn=functools.partial(
@@ -1314,7 +1318,7 @@ def main():
             interval=args.interval,
             lr=args.lr,
             device=args.device,
-            distributed=False,
+            distributed=True,
         )
 
     elif args.mode == "explore":
@@ -1334,7 +1338,7 @@ def main():
             interval=args.interval,
             lr=args.lr,
             device=args.device,
-            distributed=False,
+            distributed=True,
         )
 
     elif args.mode == "explore":
