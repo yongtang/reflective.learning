@@ -1,22 +1,17 @@
 import datetime
-import json
 import os
 
 import torch
 import torch.distributed.launcher
 
 
-def f_entrypoint(data, kind):
-    # env set by the elastic agent
-    rank = int(os.environ["RANK"])
-    world_size = int(os.environ["WORLD_SIZE"])
-
+def f_entrypoint(callback, file, choice, data, image, total, batch, interval, lr, kind):
     # single-node defaults
     os.environ.setdefault("GLOO_SOCKET_IFNAME", "lo")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
 
-    # decide per-rank device/backend (kind is "cpu" or "cuda")
+    # choose per-rank device/backend from requested kind
     match kind:
         case "cuda":
             local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -29,88 +24,42 @@ def f_entrypoint(data, kind):
         case _:
             assert False, kind
 
-    print(f"[rank={rank}] init process group", flush=True)
+    # (optional) pre-init log using LOCAL_RANK since global RANK isn't set yet
+    print(
+        f"[local_rank={os.environ.get('LOCAL_RANK', 0)}] init process group", flush=True
+    )
+
     torch.distributed.init_process_group(
         backend=backend,
         init_method="env://",
         timeout=datetime.timedelta(seconds=300),
     )
+
+    rank = torch.distributed.get_rank()
+    world_size = torch.distributed.get_world_size()
     print(f"[rank={rank}] process group ok", flush=True)
 
-    # model
-    model = torch.nn.Sequential(
-        torch.nn.Linear(32, 64), torch.nn.ReLU(), torch.nn.Linear(64, 4)
-    ).to(device)
-
-    # minimal DDP
-    if device.type == "cuda":
-        model = torch.nn.parallel.DistributedDataParallel(
-            model, device_ids=[device.index], output_device=device.index
-        )
-    else:
-        model = torch.nn.parallel.DistributedDataParallel(model)
-
-    # tiny dataset: [1,2,3,4,5] -> features 32, labels in 0..3
-    vals = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
-    X = vals.view(-1, 1).repeat(1, 32)  # shape [5, 32]
-    y = vals.long() % 4  # shape [5]
-    dataset = torch.utils.data.TensorDataset(X, y)
-
-    sampler = torch.utils.data.distributed.DistributedSampler(
-        dataset, num_replicas=world_size, rank=rank, shuffle=True
+    callback(
+        file=file,
+        choice=choice,
+        data=data,
+        image=image,
+        total=total,
+        batch=batch,
+        interval=interval,
+        lr=lr,
+        device=device,
+        rank=rank,
+        world_size=world_size,
+        distributed=True,
     )
-    loader = torch.utils.data.DataLoader(
-        dataset, batch_size=2, sampler=sampler, shuffle=False, drop_last=False
-    )
-
-    opt = torch.optim.SGD(model.parameters(), 1e-2)
-    criterion = torch.nn.CrossEntropyLoss()
-
-    sampler.set_epoch(0)  # important: add more epochs later
-
-    # accumulate sample-weighted loss for a true global mean
-    sum_loss = torch.zeros((), device=device)
-    n_samples = torch.zeros((), device=device)
-
-    for xb, yb in loader:
-        xb = xb.to(device)
-        yb = yb.to(device)
-        opt.zero_grad(set_to_none=True)
-        logits = model(xb)
-        loss = criterion(logits, yb)  # mean over batch
-        loss.backward()
-        opt.step()
-
-        bs = xb.size(0)
-        sum_loss += loss.detach() * bs
-        n_samples += bs
-
-    # global mean loss across all ranks
-    values = torch.stack([sum_loss, n_samples], 0)
-    torch.distributed.all_reduce(values, op=torch.distributed.ReduceOp.SUM)
-    metric = (values[0] / values[1]).item()
-
-    if rank == 0:
-        with open(os.path.join(data, "artifact.json"), "w") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "loss_mean": metric,
-                        "world_size": world_size,
-                        "device": str(kind),
-                    }
-                )
-            )
 
     torch.distributed.barrier()
     torch.distributed.destroy_process_group()
 
 
-def launch(data, device):
-    device = list(
-        torch.device(e)
-        for e in set(device or ["cuda"] if torch.cuda.is_available() else ["cpu"])
-    )
+def launch(callback, file, choice, data, image, total, batch, interval, lr, device):
+    device = list(torch.device(e) for e in set(device))
     kind = {e.type for e in device}
     assert len(kind) == 1
     kind = next(iter(kind))
@@ -148,5 +97,5 @@ def launch(data, device):
         monitor_interval=1,
     )
     torch.distributed.launcher.api.elastic_launch(config, entrypoint=f_entrypoint)(
-        data, kind
+        callback, file, choice, data, image, total, batch, interval, lr, kind
     )

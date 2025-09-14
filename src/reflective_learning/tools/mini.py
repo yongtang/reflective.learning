@@ -545,13 +545,25 @@ class FinetuneDataset(torch.utils.data.IterableDataset):
             )
 
 
-def f_learn(file, choice, data, image, total, batch, interval, lr, device):
+def f_learn(
+    file,
+    choice,
+    data,
+    image,
+    total,
+    batch,
+    interval,
+    lr,
+    device,
+    rank,
+    world_size,
+    distributed,
+):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
     info, model = operator.itemgetter("info", choice)(
         torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
     )
     model = f_model(info, model)
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     dataset = np.load(file, allow_pickle=False)
@@ -567,27 +579,11 @@ def f_learn(file, choice, data, image, total, batch, interval, lr, device):
         ),
         data=data,
     ) as dataset:
-
-        distributed = False
-
         collate_fn = model.collate
 
-        if not distributed:
-            rank = 0
-            model.to(device)
-            sampler = None
-        else:
-            rank = torch.distributed.get_rank()
-            world_size = torch.distributed.get_world_size()
-            local_rank = int(os.environ.get("LOCAL_RANK", 0))
-            device = (
-                torch.device(f"cuda:{local_rank}")
-                if torch.cuda.is_available()
-                else torch.device("cpu")
-            )
-
-            # move & wrap in DDP
-            model.to(device)
+        sampler = None
+        model.to(device)
+        if distributed:
             if device.type == "cuda":
                 model = torch.nn.parallel.DistributedDataParallel(
                     model, device_ids=[device.index], output_device=device.index
@@ -598,12 +594,10 @@ def f_learn(file, choice, data, image, total, batch, interval, lr, device):
             sampler = torch.utils.data.distributed.DistributedSampler(
                 dataset, num_replicas=world_size, rank=rank, shuffle=True
             )
+            # no epoch loop so no sampler.set_epoch(0)
 
             # keep per-rank cap consistent with shard size (optional but safe)
             total = min(total, len(sampler))
-
-            # if loop epochs, call this each epoch with the epoch number
-            sampler.set_epoch(0)
 
         loader = torch.utils.data.DataLoader(
             dataset,
@@ -631,14 +625,26 @@ def f_learn(file, choice, data, image, total, batch, interval, lr, device):
         )
 
 
-def f_finetune(file, choice, data, image, total, batch, interval, lr, device):
+def f_finetune(
+    file,
+    choice,
+    data,
+    image,
+    total,
+    batch,
+    interval,
+    lr,
+    device,
+    rank,
+    world_size,
+    distributed,
+):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
     info, finetune = operator.itemgetter("info", choice)(
         torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
     )
     baseline = f_model(info, finetune)
     finetune = f_model(info, finetune)
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     dataset = np.load(file, allow_pickle=False)
@@ -654,29 +660,12 @@ def f_finetune(file, choice, data, image, total, batch, interval, lr, device):
         ),
         data=data,
     ) as dataset:
-        distributed = False
-
-        # capture collate before any DDP wrapping
         collate_fn = finetune.collate
 
-        if not distributed:
-            rank = 0
-            baseline.to(device)
-            finetune.to(device)
-            sampler = None
-        else:
-            rank = torch.distributed.get_rank()
-            world_size = torch.distributed.get_world_size()
-            local_rank = int(os.environ.get("LOCAL_RANK", 0))
-            device = (
-                torch.device(f"cuda:{local_rank}")
-                if torch.cuda.is_available()
-                else torch.device("cpu")
-            )
-
-            # move & wrap finetune in DDP; baseline can stay as-is (eval/no grad), or also be wrapped if you wish
-            baseline.to(device)
-            finetune.to(device)
+        sampler = None
+        baseline.to(device)
+        finetune.to(device)
+        if distributed:
             if device.type == "cuda":
                 finetune = torch.nn.parallel.DistributedDataParallel(
                     finetune, device_ids=[device.index], output_device=device.index
@@ -687,11 +676,10 @@ def f_finetune(file, choice, data, image, total, batch, interval, lr, device):
             sampler = torch.utils.data.distributed.DistributedSampler(
                 dataset, num_replicas=world_size, rank=rank, shuffle=True
             )
+            # no epoch loop so no sampler.set_epoch(0)
 
             # optional: cap per-rank total to shard size
             total = min(total, len(sampler))
-            # if you loop epochs, call this each epoch
-            sampler.set_epoch(0)
 
         loader = torch.utils.data.DataLoader(
             dataset,
@@ -914,7 +902,7 @@ def run_spin(seed, data, image, max_steps):
     return
 
 
-def run_learn(choice, data, image, total, batch, interval, lr, device):
+def run_learn(choice, data, image, total, batch, interval, lr, device, distributed):
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
 
@@ -962,7 +950,39 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
         file = os.path.join(directory, "dataset.npy")
         np.save(file, dataset)
 
-        f_learn(file, choice, data, image, total, batch, interval, lr, device)
+        device = device or (["cuda"] if torch.cuda.is_available() else ["cpu"])
+
+        if distributed:
+            launch(
+                callback=f_learn,
+                file=file,
+                choice=choice,
+                data=data,
+                image=image,
+                total=total,
+                batch=batch,
+                interval=interval,
+                lr=lr,
+                device=device,
+            )
+        else:
+            assert len(device) == 1, device
+            device = next(iter(device))
+
+            f_learn(
+                file=file,
+                choice=choice,
+                data=data,
+                image=image,
+                total=total,
+                batch=batch,
+                interval=interval,
+                lr=lr,
+                device=device,
+                rank=0,
+                world_size=1,
+                distributed=False,
+            )
 
 
 def run_explore(data, image, total, device):
@@ -1073,7 +1093,7 @@ def run_explore(data, image, total, device):
     return
 
 
-def run_finetune(data, image, total, batch, interval, lr, device):
+def run_finetune(data, image, total, batch, interval, lr, device, distributed):
 
     choice = "success"
 
@@ -1139,7 +1159,39 @@ def run_finetune(data, image, total, batch, interval, lr, device):
         file = os.path.join(directory, "dataset.npy")
         np.save(file, dataset)
 
-        f_finetune(file, choice, data, image, total, batch, interval, lr, device)
+        device = device or (["cuda"] if torch.cuda.is_available() else ["cpu"])
+
+        if distributed:
+            launch(
+                callback=f_finetune,
+                file=file,
+                choice=choice,
+                data=data,
+                image=image,
+                total=total,
+                batch=batch,
+                interval=interval,
+                lr=lr,
+                device=device,
+            )
+        else:
+            assert len(device) == 1, device
+            device = next(iter(device))
+
+            f_finetune(
+                file=file,
+                choice=choice,
+                data=data,
+                image=image,
+                total=total,
+                batch=batch,
+                interval=interval,
+                lr=lr,
+                device=device,
+                rank=0,
+                world_size=1,
+                distributed=False,
+            )
 
 
 def run_play(goal, start, facing, model, device):
@@ -1206,7 +1258,7 @@ def main():
     learn_parser.add_argument("--batch", type=int, required=True)
     learn_parser.add_argument("--interval", type=int, required=True)
     learn_parser.add_argument("--lr", type=float, required=True)
-    learn_parser.add_argument("--device")
+    learn_parser.add_argument("--device", nargs="+")
 
     # ---- explore mode ----
     explore_parser = subparsers.add_parser("explore", help="Explore mode")
@@ -1223,7 +1275,7 @@ def main():
     finetune_parser.add_argument("--batch", type=int, required=True)
     finetune_parser.add_argument("--interval", type=int, required=True)
     finetune_parser.add_argument("--lr", type=float, required=True)
-    finetune_parser.add_argument("--device")
+    finetune_parser.add_argument("--device", nargs="+")
 
     # ---- play mode ----
     play_parser = subparsers.add_parser("play", help="Play mode")
@@ -1232,11 +1284,6 @@ def main():
     play_parser.add_argument("--start", type=f_pair, required=True)
     play_parser.add_argument("--facing", choices=facing_space, required=True)
     play_parser.add_argument("--device")
-
-    # ---- launch mode ----
-    launch_parser = subparsers.add_parser("launch", help="Launch mode")
-    launch_parser.add_argument("--data", required=True)
-    launch_parser.add_argument("--device", nargs="+")
 
     args = parser.parse_args()
     print(f"Load args: {json.dumps(vars(args), sort_keys=True)}")
@@ -1267,6 +1314,7 @@ def main():
             interval=args.interval,
             lr=args.lr,
             device=args.device,
+            distributed=False,
         )
 
     elif args.mode == "explore":
@@ -1286,6 +1334,7 @@ def main():
             interval=args.interval,
             lr=args.lr,
             device=args.device,
+            distributed=False,
         )
 
     elif args.mode == "explore":
@@ -1302,12 +1351,6 @@ def main():
             start=args.start,
             facing=args.facing,
             model=args.model,
-            device=args.device,
-        )
-
-    elif args.mode == "launch":
-        launch(
-            data=args.data,
             device=args.device,
         )
 
