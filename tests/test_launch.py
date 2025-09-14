@@ -1,7 +1,6 @@
 import json
 import pathlib
 
-import pytest
 import torch
 
 from reflective_learning.launch import launch
@@ -34,18 +33,6 @@ def f(
     )
 
 
-@pytest.mark.parametrize(
-    "device",
-    [
-        pytest.param(
-            "cpu",
-        ),
-        pytest.param(
-            "cuda",
-            marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA"),
-        ),
-    ],
-)
 def test_launch(tmp_path, device):
 
     data = tmp_path
