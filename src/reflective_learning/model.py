@@ -226,14 +226,15 @@ class ReflectiveCore(nn.Module):
         # Gather logits for each token prediction step
         step = logit.gather(1, position.unsqueeze(-1).expand(B, T, V))  # [B, T, V]
 
-        # Convert to log-probabilities (stable log-softmax via logsumexp)
-        logp = step - torch.logsumexp(step, dim=-1, keepdim=True)
+        # Normalize with log_softmax (fp32 for stability) vs. (log-softmax via logsumexp)
+        with torch.autocast(device_type=embed.device.type, enabled=False):
+            logp = F.log_softmax(step, dim=-1)
 
         # Keep only the log-prob assigned to the reference token
         logp = logp.gather(-1, token.unsqueeze(-1)).squeeze(-1)  # [B, T]
 
         # Zero-out invalid positions
-        logp = logp * valid.float()
+        logp = logp.masked_fill(~valid, 0.0)
 
         # Return SUM of valid token log-probabilities per sequence
         return logp.sum(dim=1)  # [B]
