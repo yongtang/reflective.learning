@@ -16,6 +16,7 @@ def f_entrypoint(data, kind):
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
 
+    # decide per-rank device/backend (kind is "cpu" or "cuda")
     match kind:
         case "cuda":
             local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -36,21 +37,58 @@ def f_entrypoint(data, kind):
     )
     print(f"[rank={rank}] process group ok", flush=True)
 
-    # tiny demo workload
+    # model
     model = torch.nn.Sequential(
         torch.nn.Linear(32, 64), torch.nn.ReLU(), torch.nn.Linear(64, 4)
     ).to(device)
-    x = torch.randn(16, 32, device=device)
-    y = torch.randint(0, 4, (16,), device=device)
-    opt = torch.optim.SGD(model.parameters(), 1e-2)
-    loss = torch.nn.CrossEntropyLoss()(model(x), y)
-    loss.backward()
-    opt.step()
 
-    # reduce a metric across ranks
-    loss = loss.detach().float().to(device)
-    torch.distributed.all_reduce(loss, op=torch.distributed.ReduceOp.SUM)
-    metric = loss.item() / world_size
+    # minimal DDP
+    if device.type == "cuda":
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[device.index], output_device=device.index
+        )
+    else:
+        model = torch.nn.parallel.DistributedDataParallel(model)
+
+    # tiny dataset: [1,2,3,4,5] -> features 32, labels in 0..3
+    vals = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
+    X = vals.view(-1, 1).repeat(1, 32)  # shape [5, 32]
+    y = vals.long() % 4  # shape [5]
+    dataset = torch.utils.data.TensorDataset(X, y)
+
+    sampler = torch.utils.data.distributed.DistributedSampler(
+        dataset, num_replicas=world_size, rank=rank, shuffle=True
+    )
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=2, sampler=sampler, shuffle=False, drop_last=False
+    )
+
+    opt = torch.optim.SGD(model.parameters(), 1e-2)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    sampler.set_epoch(0)  # important: add more epochs later
+
+    # accumulate sample-weighted loss for a true global mean
+    sum_loss = torch.zeros((), device=device)
+    n_samples = torch.zeros((), device=device)
+
+    for xb, yb in loader:
+        xb = xb.to(device)
+        yb = yb.to(device)
+        opt.zero_grad(set_to_none=True)
+        logits = model(xb)
+        loss = criterion(logits, yb)  # mean over batch
+        loss.backward()
+        opt.step()
+
+        bs = xb.size(0)
+        sum_loss += loss.detach() * bs
+        n_samples += bs
+
+    # global mean loss across all ranks
+    values = torch.stack([sum_loss, n_samples], 0)
+    torch.distributed.all_reduce(values, op=torch.distributed.ReduceOp.SUM)
+    metric = (values[0] / values[1]).item()
 
     if rank == 0:
         with open(os.path.join(data, "artifact.json"), "w") as f:
