@@ -1119,7 +1119,7 @@ def main():
     # ---- launch mode ----
     launch_parser = subparsers.add_parser("launch", help="Launch mode")
     launch_parser.add_argument("--data", required=True)
-    launch_parser.add_argument("--device")
+    launch_parser.add_argument("--device", nargs="+")
 
     args = parser.parse_args()
     print(f"Load args: {json.dumps(vars(args), sort_keys=True)}")
@@ -1189,7 +1189,10 @@ def main():
         )
 
     elif args.mode == "launch":
-        launch(data=args.data, device=args.device)
+        launch(
+            data=args.data,
+            device=args.device,
+        )
 
     else:
         assert False, f"Unhandled mode: {args.mode}"
