@@ -738,17 +738,6 @@ def run_spin(seed, data, image, max_steps):
 
 
 def run_learn(choice, data, image, total, batch, interval, lr, device):
-    print(f"Load model: {os.path.join(data, f'model.pt')}")
-
-    info, model = operator.itemgetter("info", choice)(
-        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    )
-    model = f_model(info, model)
-
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-
-    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
-
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
 
@@ -791,6 +780,14 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
 
     dataset = np.concatenate([essential, reservoir], axis=0)
     random.shuffle(dataset)
+
+    print(f"Load model: {os.path.join(data, f'model.pt')}")
+    info, model = operator.itemgetter("info", choice)(
+        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    )
+    model = f_model(info, model)
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     with LearnDataset(
         dataset=dataset,
@@ -977,19 +974,8 @@ def run_explore(data, image, total, device):
 
 
 def run_finetune(data, image, total, batch, interval, lr, device):
-    print(f"Load model: {os.path.join(data, f'model.pt')}")
 
     choice = "success"
-
-    info, finetune = operator.itemgetter("info", choice)(
-        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    )
-    baseline = f_model(info, finetune)
-    finetune = f_model(info, finetune)
-
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-
-    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
@@ -1048,6 +1034,15 @@ def run_finetune(data, image, total, batch, interval, lr, device):
 
     dataset = pairs[random.integers(0, len(pairs), size=total)]
     random.shuffle(dataset)
+
+    print(f"Load model: {os.path.join(data, f'model.pt')}")
+    info, finetune = operator.itemgetter("info", choice)(
+        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    )
+    baseline = f_model(info, finetune)
+    finetune = f_model(info, finetune)
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     with FinetuneDataset(
         dataset=dataset,
