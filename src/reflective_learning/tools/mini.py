@@ -545,6 +545,183 @@ class FinetuneDataset(torch.utils.data.IterableDataset):
             )
 
 
+def f_learn(file, choice, data, image, total, batch, interval, lr, device):
+    print(f"Load model: {os.path.join(data, f'model.pt')}")
+    info, model = operator.itemgetter("info", choice)(
+        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    )
+    model = f_model(info, model)
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+
+    dataset = np.load(file, allow_pickle=False)
+    with LearnDataset(
+        dataset=dataset,
+        datum_fn=functools.partial(
+            f_datum,
+            vocab_fn=lambda e: info["vocab"][e],
+            state_fn=lambda e: state_space.index(e),
+            max_steps=info["max"],
+            image=image,
+            encoder=encoder,
+        ),
+        data=data,
+    ) as dataset:
+
+        distributed = False
+
+        collate_fn = model.collate
+
+        if not distributed:
+            rank = 0
+            model.to(device)
+            sampler = None
+        else:
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            device = (
+                torch.device(f"cuda:{local_rank}")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
+
+            # move & wrap in DDP
+            model.to(device)
+            if device.type == "cuda":
+                model = torch.nn.parallel.DistributedDataParallel(
+                    model, device_ids=[device.index], output_device=device.index
+                )
+            else:
+                model = torch.nn.parallel.DistributedDataParallel(model)
+
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset, num_replicas=world_size, rank=rank, shuffle=True
+            )
+
+            # keep per-rank cap consistent with shard size (optional but safe)
+            total = min(total, len(sampler))
+
+            # if loop epochs, call this each epoch with the epoch number
+            sampler.set_epoch(0)
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch,
+            collate_fn=collate_fn,  # use captured collate
+            sampler=sampler,
+            shuffle=False,
+            drop_last=False,
+        )
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        train(
+            model=model,
+            loader=loader,
+            optimizer=optimizer,
+            total=total,
+            callback=functools.partial(
+                f_callback,
+                data=data,
+                choice=choice,
+                interval=interval,
+                distributed=distributed,
+            ),
+            device=device,
+            rank=rank,
+        )
+
+
+def f_finetune(file, choice, data, image, total, batch, interval, lr, device):
+    print(f"Load model: {os.path.join(data, f'model.pt')}")
+    info, finetune = operator.itemgetter("info", choice)(
+        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    )
+    baseline = f_model(info, finetune)
+    finetune = f_model(info, finetune)
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+
+    dataset = np.load(file, allow_pickle=False)
+    with FinetuneDataset(
+        dataset=dataset,
+        datum_fn=functools.partial(
+            f_datum,
+            vocab_fn=lambda e: info["vocab"][e],
+            state_fn=lambda e: state_space.index(e),
+            max_steps=info["max"],
+            image=image,
+            encoder=encoder,
+        ),
+        data=data,
+    ) as dataset:
+        distributed = False
+
+        # capture collate before any DDP wrapping
+        collate_fn = finetune.collate
+
+        if not distributed:
+            rank = 0
+            baseline.to(device)
+            finetune.to(device)
+            sampler = None
+        else:
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            device = (
+                torch.device(f"cuda:{local_rank}")
+                if torch.cuda.is_available()
+                else torch.device("cpu")
+            )
+
+            # move & wrap finetune in DDP; baseline can stay as-is (eval/no grad), or also be wrapped if you wish
+            baseline.to(device)
+            finetune.to(device)
+            if device.type == "cuda":
+                finetune = torch.nn.parallel.DistributedDataParallel(
+                    finetune, device_ids=[device.index], output_device=device.index
+                )
+            else:
+                finetune = torch.nn.parallel.DistributedDataParallel(finetune)
+
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                dataset, num_replicas=world_size, rank=rank, shuffle=True
+            )
+
+            # optional: cap per-rank total to shard size
+            total = min(total, len(sampler))
+            # if you loop epochs, call this each epoch
+            sampler.set_epoch(0)
+
+        loader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch,
+            collate_fn=lambda batch: tuple(
+                map(collate_fn, zip(*batch))
+            ),  # use captured collate
+            sampler=sampler,
+            shuffle=False,
+            drop_last=False,
+        )
+        optimizer = torch.optim.Adam(finetune.parameters(), lr=lr)
+        dpo(
+            baseline=baseline,
+            finetune=finetune,
+            loader=loader,
+            optimizer=optimizer,
+            total=total,
+            callback=functools.partial(
+                f_callback,
+                data=data,
+                choice=choice,
+                interval=interval,
+                distributed=distributed,
+            ),
+            device=device,
+            rank=rank,
+        )
+
+
 def run_seed(env_size, max_steps, num_seeds, save_seed):
     step_width = len(str(max_steps))
     total_width = len(str(num_seeds))
@@ -784,92 +961,8 @@ def run_learn(choice, data, image, total, batch, interval, lr, device):
     with tempfile.TemporaryDirectory() as directory:
         file = os.path.join(directory, "dataset.npy")
         np.save(file, dataset)
-        dataset = np.load(file, allow_pickle=False)
 
-        print(f"Load model: {os.path.join(data, f'model.pt')}")
-        info, model = operator.itemgetter("info", choice)(
-            torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-        )
-        model = f_model(info, model)
-        device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
-        )
-        encoder = ContextEncoder.from_pretrained(info["context"], device=device)
-
-        with LearnDataset(
-            dataset=dataset,
-            datum_fn=functools.partial(
-                f_datum,
-                vocab_fn=lambda e: info["vocab"][e],
-                state_fn=lambda e: state_space.index(e),
-                max_steps=info["max"],
-                image=image,
-                encoder=encoder,
-            ),
-            data=data,
-        ) as dataset:
-
-            distributed = False
-
-            collate_fn = model.collate
-
-            if not distributed:
-                rank = 0
-                model.to(device)
-                sampler = None
-            else:
-                rank = torch.distributed.get_rank()
-                world_size = torch.distributed.get_world_size()
-                local_rank = int(os.environ.get("LOCAL_RANK", 0))
-                device = (
-                    torch.device(f"cuda:{local_rank}")
-                    if torch.cuda.is_available()
-                    else torch.device("cpu")
-                )
-
-                # move & wrap in DDP
-                model.to(device)
-                if device.type == "cuda":
-                    model = torch.nn.parallel.DistributedDataParallel(
-                        model, device_ids=[device.index], output_device=device.index
-                    )
-                else:
-                    model = torch.nn.parallel.DistributedDataParallel(model)
-
-                sampler = torch.utils.data.distributed.DistributedSampler(
-                    dataset, num_replicas=world_size, rank=rank, shuffle=True
-                )
-
-                # keep per-rank cap consistent with shard size (optional but safe)
-                total = min(total, len(sampler))
-
-                # if loop epochs, call this each epoch with the epoch number
-                sampler.set_epoch(0)
-
-            loader = torch.utils.data.DataLoader(
-                dataset,
-                batch_size=batch,
-                collate_fn=collate_fn,  # use captured collate
-                sampler=sampler,
-                shuffle=False,
-                drop_last=False,
-            )
-            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-            train(
-                model=model,
-                loader=loader,
-                optimizer=optimizer,
-                total=total,
-                callback=functools.partial(
-                    f_callback,
-                    data=data,
-                    choice=choice,
-                    interval=interval,
-                    distributed=distributed,
-                ),
-                device=device,
-                rank=rank,
-            )
+        f_learn(file, choice, data, image, total, batch, interval, lr, device)
 
 
 def run_explore(data, image, total, device):
@@ -1045,96 +1138,8 @@ def run_finetune(data, image, total, batch, interval, lr, device):
     with tempfile.TemporaryDirectory() as directory:
         file = os.path.join(directory, "dataset.npy")
         np.save(file, dataset)
-        dataset = np.load(file, allow_pickle=False)
-        print(f"Load model: {os.path.join(data, f'model.pt')}")
-        info, finetune = operator.itemgetter("info", choice)(
-            torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-        )
-        baseline = f_model(info, finetune)
-        finetune = f_model(info, finetune)
-        device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
-        )
-        encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-        with FinetuneDataset(
-            dataset=dataset,
-            datum_fn=functools.partial(
-                f_datum,
-                vocab_fn=lambda e: info["vocab"][e],
-                state_fn=lambda e: state_space.index(e),
-                max_steps=info["max"],
-                image=image,
-                encoder=encoder,
-            ),
-            data=data,
-        ) as dataset:
-            distributed = False
-
-            # capture collate before any DDP wrapping
-            collate_fn = finetune.collate
-
-            if not distributed:
-                rank = 0
-                baseline.to(device)
-                finetune.to(device)
-                sampler = None
-            else:
-                rank = torch.distributed.get_rank()
-                world_size = torch.distributed.get_world_size()
-                local_rank = int(os.environ.get("LOCAL_RANK", 0))
-                device = (
-                    torch.device(f"cuda:{local_rank}")
-                    if torch.cuda.is_available()
-                    else torch.device("cpu")
-                )
-
-                # move & wrap finetune in DDP; baseline can stay as-is (eval/no grad), or also be wrapped if you wish
-                baseline.to(device)
-                finetune.to(device)
-                if device.type == "cuda":
-                    finetune = torch.nn.parallel.DistributedDataParallel(
-                        finetune, device_ids=[device.index], output_device=device.index
-                    )
-                else:
-                    finetune = torch.nn.parallel.DistributedDataParallel(finetune)
-
-                sampler = torch.utils.data.distributed.DistributedSampler(
-                    dataset, num_replicas=world_size, rank=rank, shuffle=True
-                )
-
-                # optional: cap per-rank total to shard size
-                total = min(total, len(sampler))
-                # if you loop epochs, call this each epoch
-                sampler.set_epoch(0)
-
-            loader = torch.utils.data.DataLoader(
-                dataset,
-                batch_size=batch,
-                collate_fn=lambda batch: tuple(
-                    map(collate_fn, zip(*batch))
-                ),  # use captured collate
-                sampler=sampler,
-                shuffle=False,
-                drop_last=False,
-            )
-            optimizer = torch.optim.Adam(finetune.parameters(), lr=lr)
-            dpo(
-                baseline=baseline,
-                finetune=finetune,
-                loader=loader,
-                optimizer=optimizer,
-                total=total,
-                callback=functools.partial(
-                    f_callback,
-                    data=data,
-                    choice=choice,
-                    interval=interval,
-                    distributed=distributed,
-                ),
-                device=device,
-                rank=rank,
-            )
+        f_finetune(file, choice, data, image, total, batch, interval, lr, device)
 
 
 def run_play(goal, start, facing, model, device):
