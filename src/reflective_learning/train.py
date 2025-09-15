@@ -47,7 +47,7 @@ def prob(model, mask, embed, token, index):
 
     # Normalize with log_softmax (fp32 for stability) vs. (log-softmax via logsumexp)
     with torch.autocast(device_type=embed.device.type, enabled=False):
-        logp = F.log_softmax(step, dim=-1)
+        logp = torch.nn.functional.log_softmax(step, dim=-1)
 
     # Keep only the log-prob assigned to the reference token
     logp = logp.gather(-1, token.unsqueeze(-1)).squeeze(-1)  # [B, T]
