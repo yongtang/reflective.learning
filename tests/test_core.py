@@ -1,6 +1,7 @@
 import torch
 
 from reflective_learning.model import ReflectiveCore
+from reflective_learning.train import loss_fn
 
 
 def test_reflective_transformer_forward_and_loss():
@@ -50,7 +51,7 @@ def test_reflective_transformer_forward_and_loss():
     full_label = torch.cat([pad, label], dim=1)  # [B, C+T-1]
 
     index = torch.full((batch_size,), max_prefix_len, dtype=torch.long)  # [B]
-    loss = model.loss(logit, full_label, index, mask)
+    loss = loss_fn(logit, full_label, index, mask)
     assert loss.item() > 0
 
 
