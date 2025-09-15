@@ -1101,6 +1101,8 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
 
     choice = "success"
 
+    info = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")["info"]
+
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
 
