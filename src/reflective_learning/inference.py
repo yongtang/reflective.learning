@@ -16,7 +16,7 @@ def sequence(
 
     Args:
         model: Iterable container of trained sub-models (one per label), each exposing
-               forward(token, prefix) -> logits[V].
+               call(token, prefix) -> logits[V].
         reduce: The function to summerize the logits from different models.
         prefix (Tensor): [C, D] prefix embedding.
         maximum (int): Maximum number of tokens to generate.
@@ -42,7 +42,7 @@ def sequence(
 
             # run model forwards under autocast; keep softmax math in fp32
             with autocast():
-                logit = tuple(e.forward(data, prefix) for e in model)  # M x [V]
+                logit = tuple(e.call(data, prefix) for e in model)  # M x [V]
             logit = reduce(logit).float()  # [V]
 
             # guard against NaN/Inf for this step only
@@ -98,7 +98,7 @@ def explore(
 
     Args:
         model: Iterable container of trained sub-models (one per label), each exposing
-               forward(token, prefix) -> logits[V].
+               call(token, prefix) -> logits[V].
         prefix (Tensor): [C, D] fixed prefix embedding for this sequence.
         maximum (int): Maximum number of tokens to generate (upper bound).
         device (device): Device for computation.
@@ -129,7 +129,7 @@ def explore(
             # Collect next-token logits from each model independently: shape [M, V].
             with autocast():
                 logit = torch.stack(
-                    [e.forward(data, prefix) for e in model], dim=0
+                    [e.call(data, prefix) for e in model], dim=0
                 )  # [M, V]
 
             # Bayes-balanced mixing weights:

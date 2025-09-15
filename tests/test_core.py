@@ -42,7 +42,7 @@ def test_reflective_transformer_forward_and_loss():
     embed = torch.cat([prefix, x], dim=1)  # [B, C+T-1, D]
     mask = torch.ones(embed.shape[:2], dtype=torch.bool)  # [B, C+T-1]
 
-    logit = model.call(mask=mask, embed=embed)  # [B, C+T-1, V]
+    logit = model.forward(mask=mask, embed=embed)  # [B, C+T-1, V]
     assert logit.shape == (batch_size, max_prefix_len + input.size(1), vocab_size)
 
     # Pad label to match logit (prepend dummy for prefix positions)
@@ -83,5 +83,5 @@ def test_reflective_transformer_forward_single():
     token = torch.randint(0, vocab_size, (T,))  # [T]
     prefix = torch.randn(C, D)  # [C, D]
 
-    logit = model.forward(token=token, prefix=prefix)  # [V]
+    logit = model.call(token=token, prefix=prefix)  # [V]
     assert logit.shape == (vocab_size,)  # Single-step prediction

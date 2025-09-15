@@ -66,7 +66,7 @@ def train(
 
             # Forward pass (model returns [B, L, V])
             with autocast():
-                logit = model.call(mask=mask, embed=embed)  # [B, L, V]
+                logit = model.forward(mask=mask, embed=embed)  # [B, L, V]
                 loss = model.loss(
                     logit=logit.float(),  # keep loss math in fp32 under autocast
                     token=token,

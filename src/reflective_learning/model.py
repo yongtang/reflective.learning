@@ -52,7 +52,7 @@ class ReflectiveCore(nn.Module):
 
         self.decoder = decoder
 
-    def forward(
+    def call(
         self,
         token: torch.Tensor,  # [T]
         prefix: torch.Tensor,  # [C, D]
@@ -89,12 +89,12 @@ class ReflectiveCore(nn.Module):
         mask = torch.ones(1, C + T, dtype=torch.bool, device=value.device)  # [1, C+T]
 
         # Call transformer
-        logit = self.call(mask=mask, embed=value)  # [1, C+T, V]
+        logit = self.forward(mask=mask, embed=value)  # [1, C+T, V]
 
         # Return logits for final token position
         return logit[0, -1]  # [V]
 
-    def call(self, mask: torch.Tensor, embed: torch.Tensor) -> torch.Tensor:
+    def forward(self, mask: torch.Tensor, embed: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for precomputed embeddings.
         Args:
@@ -210,7 +210,7 @@ class ReflectiveCore(nn.Module):
                 logP_b = sum_t valid_{b,t} * logp_{b,t}
         """
         # Run the transformer to get logits at every position
-        logit = self.call(mask=mask, embed=embed)  # [B, L, V]
+        logit = self.forward(mask=mask, embed=embed)  # [B, L, V]
         B, L, V = logit.shape
         T = token.size(1)
 
