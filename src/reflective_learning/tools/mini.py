@@ -460,31 +460,60 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     }
 
 
+def f_scan(file, callback):
+    total = 0
+    if os.path.isfile(file):
+        with open(file, "r") as f:
+            with tqdm(
+                total=os.path.getsize(file),
+                desc=f"Scan {file}",
+                unit="B",
+                unit_scale=True,
+                dynamic_ncols=True,
+            ) as progress:
+                for line in f:
+                    if line.strip():
+                        callback(progress.n, line) if callback else None
+                        total += 1
+                    progress.update(len(line.encode("utf-8")))
+    return total
+
+
+def f_data(callback, total):
+    total_width = len(str(total))
+    bar_format = (
+        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
+        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
+        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+    )
+
+    with tqdm(
+        total=total,
+        desc=f"Data {file}",
+        dynamic_ncols=True,
+        unit="data",
+        bar_format=bar_format,
+    ) as progress:
+        for index in range(total):
+            callback(index) if callback else None
+            progress.update(1)
+
+
 def f_dataset(file, choice):
-    if not os.path.isfile(file):
-        return {}
-    # Group by prefix
-    entries = collections.defaultdict(list)
-    with open(file, "r") as f:
-        with tqdm(
-            total=os.path.getsize(file),
-            desc=f"Check {choice}",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            for line in f:
-                if line.strip():
-                    entry = json.loads(line)
-                    key = json.dumps(
-                        {
-                            "text": entry["text"],
-                            "image": entry["image"],
-                        },
-                        sort_keys=True,
-                    )
-                    entries[key].append((progress.n, len(entry["token"])))
-                progress.update(len(line.encode("utf-8")))
+    entries = defaultdict(list)
+
+    def fn(offset, line):
+        entry = json.loads(line)
+        key = json.dumps(
+            {
+                "text": entry["text"],
+                "image": entry["image"],
+            },
+            sort_keys=True,
+        )
+        entries[key].append((offset, len(entry["token"])))
+
+    f_scan(file, fn)
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
@@ -715,108 +744,56 @@ def f_finetune(
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
-    step_width = len(str(max_steps))
-    total_width = len(str(num_seeds))
-    iteration_width = len(str(num_seeds * 2))  # allow room for retries
-    bar_format = (
-        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
-        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
-        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
-    )
-
-    iteration = 0
     with open(save_seed, "w") as f:
-        with tqdm(
-            total=num_seeds,
-            desc="Seed",
-            dynamic_ncols=True,
-            unit="seed",
-            bar_format=bar_format,
-        ) as progress:
-            count = 0
-            while count < num_seeds:
-                iteration += 1
+
+        def fn_seed(index):
+            while True:
                 steps = random.randint(1, max_steps)
                 goal, start, facing, action = f_observation(env_size, steps=steps)
-                if count % len(state_space) != 0:
+                if index % len(state_space) != 0:
                     goal = (
                         random.randint(1, env_size - 2),
                         random.randint(1, env_size - 2),
                     )
-
                 if list(goal) == list(start):
                     continue  # skip invalid seed
-                seed = {
-                    "env": env_size,
-                    "goal": goal,
-                    "start": start,
-                    "facing": facing,
-                    "action": action,
-                }
+            entry = {
+                "env": env_size,
+                "goal": goal,
+                "start": start,
+                "facing": facing,
+                "action": action,
+            }
+            f.write(json.dumps(seed, sort_keys=True) + "\n")
 
-                f.write(json.dumps(seed, sort_keys=True) + "\n")
-                progress.set_postfix_str(
-                    f"steps={steps:{step_width}d} saved={count+1:{total_width}d} iteration={iteration:{iteration_width}d}"
-                )
-                progress.update(1)
-                count += 1
+        f_data(num_seeds, fn_seed)
 
 
 def run_spin(seed, data, image, max_steps):
-    def f_fail(vocab, line):
-        entry = json.loads(line)
-        if not (0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1):
-            return True
-        if not (0 < entry["goal"][1] and entry["goal"][1] < entry["env"] - 1):
-            return True
-        if not (0 < entry["start"][0] and entry["start"][0] < entry["env"] - 1):
-            return True
-        if not (0 < entry["start"][1] and entry["start"][1] < entry["env"] - 1):
-            return True
-        if not (entry["facing"] in facing_space):
-            return True
-        if not (all(e in [o.name for o in action_space] for e in entry["action"])):
-            return True
-        if not (all(e in vocab.keys() for e in entry["action"])):
-            return True
-
-        return False
-
     total = 0
     steps = set()
     env_size = set()
     vocab = {e.name: (action_space.index(e)) for e in action_space}
-    with open(seed, "r") as f:
-        with tqdm(
-            total=os.path.getsize(seed),
-            desc="Seed check",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            for line in f:
-                progress.update(len(line.encode("utf-8")))
-                if line.strip():
-                    total += 1
-                    if f_fail(vocab, line):
-                        raise AssertionError(f"invalid seed:\n  {line.strip()}")
-                    entry = json.loads(line)
-                    steps.add(len(entry["action"]))
-                    env_size.add(entry["env"])
+
+    def fn_check(offset, line):
+        entry = json.loads(line)
+        assert 0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1, line
+        assert 0 < entry["goal"][1] and entry["goal"][1] < entry["env"] - 1, line
+        assert 0 < entry["start"][0] and entry["start"][0] < entry["env"] - 1, line
+        assert 0 < entry["start"][1] and entry["start"][1] < entry["env"] - 1, line
+        assert entry["facing"] in facing_space, line
+        assert all(e in [o.name for o in action_space] for e in entry["action"]), line
+        assert all(e in vocab.keys() for e in entry["action"]), line
+        steps.add(len(entry["action"]))
+        env_size.add(entry["env"])
+
+    f_scan(seed, fn_check)
 
     assert max(steps) <= max_steps, f"{sorted(steps)}"
     assert len(env_size) == 1, f"{env_size}"
     env_size = next(iter(env_size))
 
-    total_width = len(str(total))
-    bar_format = (
-        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
-        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
-        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
-    )
-
     os.makedirs(data, exist_ok=True)
-
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
@@ -824,48 +801,40 @@ def run_spin(seed, data, image, max_steps):
             )
             for choice in state_space
         }
-        with open(seed, "r") as g:
-            with tqdm(
-                total=total,
-                desc=f"Seed entry",
-                dynamic_ncols=True,
-                bar_format=bar_format,
-                unit="seed",
-            ) as progress:
-                for line in g:
-                    if line.strip():
-                        progress.update(1)
 
-                        entry = json.loads(line)
+        def fn_entry(offset, line):
+            entry = json.loads(line)
 
-                        state = f_step(
-                            step=f_replay(
-                                env_size=env_size,
-                                max_steps=max_steps,
-                                goal=entry["goal"],
-                                start=entry["start"],
-                                facing=entry["facing"],
-                                action=entry["action"],
-                            ),
-                            max_steps=max_steps,
-                        )
+            state = f_step(
+                step=f_replay(
+                    env_size=env_size,
+                    max_steps=max_steps,
+                    goal=entry["goal"],
+                    start=entry["start"],
+                    facing=entry["facing"],
+                    action=entry["action"],
+                ),
+                max_steps=max_steps,
+            )
 
-                        f[state].write(
-                            json.dumps(
-                                f_entry(
-                                    goal=entry["goal"],
-                                    start=entry["start"],
-                                    facing=entry["facing"],
-                                    image=image,
-                                    env_size=env_size,
-                                    max_steps=max_steps,
-                                    action=entry["action"],
-                                    state=state,
-                                ),
-                                sort_keys=True,
-                            )
-                            + "\n"
-                        )
+            f[state].write(
+                json.dumps(
+                    f_entry(
+                        goal=entry["goal"],
+                        start=entry["start"],
+                        facing=entry["facing"],
+                        image=image,
+                        env_size=env_size,
+                        max_steps=max_steps,
+                        action=entry["action"],
+                        state=state,
+                    ),
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+
+        f_scan(seed, fn_entry)
 
     info = {
         "env": env_size,
@@ -1035,42 +1004,38 @@ def run_explore(data, image, total, device):
             )
             for choice in state_space
         }
-        with tqdm(
-            total=total,
-            desc=f"Data entry",
-            dynamic_ncols=True,
-            unit="data",
-            bar_format=bar_format,
-        ) as progress:
-            for index in range(total):
-                while True:
-                    goal = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
-                    )
-                    start = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
-                    )
-                    if goal != start:
-                        break
-                facing = random.choice(facing_space)
 
-                entry = f_explore(
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    image=image,
-                    encoder=encoder,
-                    info=info,
-                    model=model,
-                    device=device,
+        def fn(index):
+
+            while True:
+                goal = (
+                    random.randint(1, info["env"] - 2),
+                    random.randint(1, info["env"] - 2),
                 )
+                start = (
+                    random.randint(1, info["env"] - 2),
+                    random.randint(1, info["env"] - 2),
+                )
+                if goal != start:
+                    break
+            facing = random.choice(facing_space)
 
-                f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
-                statistics[entry["state"]] += 1
+            entry = f_explore(
+                goal=goal,
+                start=start,
+                facing=facing,
+                image=image,
+                encoder=encoder,
+                info=info,
+                model=model,
+                device=device,
+            )
 
-                progress.update(1)
+            f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
+            statistics[entry["state"]] += 1
+
+        f_data(total, callback)
+
     print(
         "Statistics: "
         + "["
