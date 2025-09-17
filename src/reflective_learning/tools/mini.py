@@ -181,13 +181,13 @@ def f_model(info, state):
 
 
 def f_text(env_size, max_steps, goal, start, facing):
-    return [
+    return (
         f"env {env_size}",
         f"goal {goal[0]},{goal[1]}",
         f"start {start[0]},{start[1]}",
         f"facing {facing}",
         f"max {max_steps}",
-    ]
+    )
 
 
 def f_image(env_size, max_steps, goal, start, facing, image):
@@ -196,162 +196,7 @@ def f_image(env_size, max_steps, goal, start, facing, image):
         os.makedirs(image, exist_ok=True)
         img = f_render(env_size, max_steps, goal, start, facing)
         PIL.Image.fromarray(img).save(os.path.join(image, filename))
-    return [filename]
-
-
-def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
-    return {
-        "text": f_text(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-        ),
-        "image": f_image(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-            image=image,
-        ),
-        "token": action,
-        "state": state,
-    }
-
-
-def f_sequence(
-    goal,
-    start,
-    facing,
-    image,
-    encoder,
-    info,
-    model,
-    device,
-):
-    env_size, max_steps, vocab = (
-        info["env"],
-        info["max"],
-        info["vocab"],
-    )
-
-    entry_text = f_text(
-        env_size=env_size,
-        max_steps=max_steps,
-        goal=goal,
-        start=start,
-        facing=facing,
-    )
-    entry_image = f_image(
-        env_size=env_size,
-        max_steps=max_steps,
-        goal=goal,
-        start=start,
-        facing=facing,
-        image=image,
-    )
-    prefix = f_prefix(
-        entry_text=entry_text,
-        entry_image=entry_image,
-        encoder=encoder,
-        image=image,
-    )
-
-    token = sequence(
-        model=model,
-        reduce=lambda logit: logit[0] - logit[1],  # success - failure
-        prefix=prefix,
-        maximum=max_steps,
-        device=device,
-    )
-    action = token.tolist()
-    action = action[: action.index(0) + 1] if 0 in action else action
-
-    symbol = {v: k for k, v in vocab.items()}
-    action = [symbol[e] for e in action]
-
-    state = f_step(
-        step=f_replay(env_size, max_steps, goal, start, facing, action),
-        max_steps=max_steps,
-    )
-
-    return f_entry(
-        goal=goal,
-        start=start,
-        facing=facing,
-        image=image,
-        env_size=env_size,
-        max_steps=max_steps,
-        action=action,
-        state=state,
-    )
-
-
-def f_explore(
-    goal,
-    start,
-    facing,
-    image,
-    encoder,
-    info,
-    model,
-    device,
-):
-    env_size, max_steps, vocab = (
-        info["env"],
-        info["max"],
-        info["vocab"],
-    )
-
-    prefix = f_prefix(
-        entry_text=f_text(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-        ),
-        entry_image=f_image(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-            image=image,
-        ),
-        encoder=encoder,
-        image=image,
-    )
-
-    token = explore(
-        model=model,
-        prefix=prefix,
-        maximum=max_steps,
-        device=device,
-    )
-    action = token.tolist()
-    action = action[: action.index(0) + 1] if 0 in action else action
-
-    symbol = {v: k for k, v in vocab.items()}
-    action = [symbol[e] for e in action]
-
-    state = f_step(
-        step=f_replay(env_size, max_steps, goal, start, facing, action),
-        max_steps=max_steps,
-    )
-
-    return f_entry(
-        goal=goal,
-        start=start,
-        facing=facing,
-        image=image,
-        env_size=env_size,
-        max_steps=max_steps,
-        action=action,
-        state=state,
-    )
+    return tuple([filename])
 
 
 def f_callback(
@@ -425,15 +270,6 @@ def f_callback(
     return
 
 
-def f_prefix(entry_text, entry_image, encoder, image):
-    text_embed = list(encoder.encode_text_embed(chunk) for chunk in entry_text)
-    image_embed = list(
-        encoder.encode_image_embed(os.path.join(image, chunk)) for chunk in entry_image
-    )
-
-    return encoder.encode_embed(text=text_embed, image=image_embed)
-
-
 def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
 
@@ -446,11 +282,9 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
         dtype=torch.long,
     )
 
-    prefix = f_prefix(
-        entry_text=entry["text"],
-        entry_image=entry["image"],
-        encoder=encoder,
-        image=image,
+    prefix = encoder.encode(
+        text=tuple(entry["text"]),
+        image=tuple(os.path.join(image, e) for e in entry["image"]),
     )
 
     return {
@@ -460,31 +294,65 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     }
 
 
+def f_scan(desc, callback, file):
+    if os.path.isfile(file):
+        with open(file, "r") as f:
+            with tqdm(
+                total=os.path.getsize(file),
+                desc=desc,
+                unit="B",
+                unit_scale=True,
+                dynamic_ncols=True,
+            ) as progress:
+
+                def fn(line):
+                    data = callback(progress.n, line) if line.strip() else None
+                    progress.update(len(line.encode("utf-8")))
+                    return data
+
+                return list(filter(lambda e: e is not None, map(fn, f)))
+    return list()
+
+
+def f_data(desc, callback, total):
+    total_width = len(str(total))
+    bar_format = (
+        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
+        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
+        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+    )
+
+    with tqdm(
+        total=total,
+        desc=desc,
+        dynamic_ncols=True,
+        unit="data",
+        bar_format=bar_format,
+    ) as progress:
+
+        def fn(index):
+            data = callback(index)
+            progress.update(1)
+            return data
+
+        return list(filter(lambda e: e is not None, map(fn, range(total))))
+
+
 def f_dataset(file, choice):
-    if not os.path.isfile(file):
-        return {}
-    # Group by prefix
     entries = collections.defaultdict(list)
-    with open(file, "r") as f:
-        with tqdm(
-            total=os.path.getsize(file),
-            desc=f"Check {choice}",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            for line in f:
-                if line.strip():
-                    entry = json.loads(line)
-                    key = json.dumps(
-                        {
-                            "text": entry["text"],
-                            "image": entry["image"],
-                        },
-                        sort_keys=True,
-                    )
-                    entries[key].append((progress.n, len(entry["token"])))
-                progress.update(len(line.encode("utf-8")))
+
+    def fn(offset, line):
+        entry = json.loads(line)
+        key = json.dumps(
+            {
+                "text": entry["text"],
+                "image": entry["image"],
+            },
+            sort_keys=True,
+        )
+        entries[key].append((offset, len(entry["token"])))
+
+    f_scan(f"Scan {choice}", fn, file)
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
@@ -563,7 +431,7 @@ def f_learn(
     world_size,
     distributed,
 ):
-    print(f"Load model: {os.path.join(data, f'model.pt')}")
+    print(f"Load model: {os.path.join(data, f'model.pt')} ({choice})")
     info, model = operator.itemgetter("info", choice)(
         torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
     )
@@ -626,6 +494,7 @@ def f_learn(
             ),
             device=device,
             rank=rank,
+            desc=f"Learn {choice}",
         )
 
 
@@ -714,109 +583,178 @@ def f_finetune(
         )
 
 
-def run_seed(env_size, max_steps, num_seeds, save_seed):
-    step_width = len(str(max_steps))
-    total_width = len(str(num_seeds))
-    iteration_width = len(str(num_seeds * 2))  # allow room for retries
-    bar_format = (
-        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
-        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
-        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+def fn_prefix(entries, info, image, f_prefix, index):
+    entry = entries[index]
+    entry_text = f_text(
+        env_size=info["env"],
+        max_steps=info["max"],
+        goal=entry["goal"],
+        start=entry["start"],
+        facing=entry["facing"],
+    )
+    entry_image = f_image(
+        env_size=info["env"],
+        max_steps=info["max"],
+        goal=entry["goal"],
+        start=entry["start"],
+        facing=entry["facing"],
+        image=image,
+    )
+    entry_prefix = f_prefix(
+        entry_text=entry_text,
+        entry_image=entry_image,
     )
 
-    iteration = 0
+    return {
+        "goal": entry["goal"],
+        "start": entry["start"],
+        "facing": entry["facing"],
+        "text": entry_text,
+        "image": entry_image,
+        "prefix": entry_prefix,
+    }
+
+
+def fn_observe(entries, env_size, max_steps, index):
+    entry = entries[index]
+
+    state = f_step(
+        step=f_replay(
+            env_size=env_size,
+            max_steps=max_steps,
+            goal=entry["goal"],
+            start=entry["start"],
+            facing=entry["facing"],
+            action=entry["token"],
+        ),
+        max_steps=max_steps,
+    )
+
+    return {
+        "text": entry["text"],
+        "image": entry["image"],
+        "token": entry["token"],
+        "state": state,
+    }
+
+
+def fn_inference(entries, function, vocab, index):
+    entry = entries[index]
+
+    token = function(torch.tensor(entry["prefix"]))
+    action = token.tolist()
+    action = action[: action.index(0) + 1] if 0 in action else action
+
+    symbol = {v: k for k, v in vocab.items()}
+    action = [symbol[e] for e in action]
+
+    return {
+        "goal": entry["goal"],
+        "start": entry["start"],
+        "facing": entry["facing"],
+        "text": entry["text"],
+        "image": entry["image"],
+        "token": action,
+    }
+
+
+def run_seed(env_size, max_steps, num_seeds, save_seed):
     with open(save_seed, "w") as f:
-        with tqdm(
-            total=num_seeds,
-            desc="Seed",
-            dynamic_ncols=True,
-            unit="seed",
-            bar_format=bar_format,
-        ) as progress:
-            count = 0
-            while count < num_seeds:
-                iteration += 1
+
+        def fn_seed(index):
+            while True:
                 steps = random.randint(1, max_steps)
                 goal, start, facing, action = f_observation(env_size, steps=steps)
-                if count % len(state_space) != 0:
+                if index % len(state_space) != 0:
                     goal = (
                         random.randint(1, env_size - 2),
                         random.randint(1, env_size - 2),
                     )
+                if goal != start:
+                    break
+            entry = {
+                "env": env_size,
+                "goal": goal,
+                "start": start,
+                "facing": facing,
+                "action": action,
+            }
+            f.write(json.dumps(entry, sort_keys=True) + "\n")
 
-                if list(goal) == list(start):
-                    continue  # skip invalid seed
-                seed = {
-                    "env": env_size,
-                    "goal": goal,
-                    "start": start,
-                    "facing": facing,
-                    "action": action,
-                }
-
-                f.write(json.dumps(seed, sort_keys=True) + "\n")
-                progress.set_postfix_str(
-                    f"steps={steps:{step_width}d} saved={count+1:{total_width}d} iteration={iteration:{iteration_width}d}"
-                )
-                progress.update(1)
-                count += 1
+        f_data(desc=f"Data seed", callback=fn_seed, total=num_seeds)
 
 
 def run_spin(seed, data, image, max_steps):
-    def f_fail(vocab, line):
-        entry = json.loads(line)
-        if not (0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1):
-            return True
-        if not (0 < entry["goal"][1] and entry["goal"][1] < entry["env"] - 1):
-            return True
-        if not (0 < entry["start"][0] and entry["start"][0] < entry["env"] - 1):
-            return True
-        if not (0 < entry["start"][1] and entry["start"][1] < entry["env"] - 1):
-            return True
-        if not (entry["facing"] in facing_space):
-            return True
-        if not (all(e in [o.name for o in action_space] for e in entry["action"])):
-            return True
-        if not (all(e in vocab.keys() for e in entry["action"])):
-            return True
-
-        return False
-
     total = 0
     steps = set()
     env_size = set()
     vocab = {e.name: (action_space.index(e)) for e in action_space}
-    with open(seed, "r") as f:
-        with tqdm(
-            total=os.path.getsize(seed),
-            desc="Seed check",
-            unit="B",
-            unit_scale=True,
-            dynamic_ncols=True,
-        ) as progress:
-            for line in f:
-                progress.update(len(line.encode("utf-8")))
-                if line.strip():
-                    total += 1
-                    if f_fail(vocab, line):
-                        raise AssertionError(f"invalid seed:\n  {line.strip()}")
-                    entry = json.loads(line)
-                    steps.add(len(entry["action"]))
-                    env_size.add(entry["env"])
+
+    def fn_check(offset, line):
+        entry = json.loads(line)
+        assert 0 < entry["goal"][0] and entry["goal"][0] < entry["env"] - 1, line
+        assert 0 < entry["goal"][1] and entry["goal"][1] < entry["env"] - 1, line
+        assert 0 < entry["start"][0] and entry["start"][0] < entry["env"] - 1, line
+        assert 0 < entry["start"][1] and entry["start"][1] < entry["env"] - 1, line
+        assert entry["facing"] in facing_space, line
+        assert all(e in [o.name for o in action_space] for e in entry["action"]), line
+        assert all(e in vocab.keys() for e in entry["action"]), line
+        steps.add(len(entry["action"]))
+        env_size.add(entry["env"])
+        return entry
+
+    entries = f_scan(desc=f"Scan seed", callback=fn_check, file=seed)
 
     assert max(steps) <= max_steps, f"{sorted(steps)}"
     assert len(env_size) == 1, f"{env_size}"
     env_size = next(iter(env_size))
 
-    total_width = len(str(total))
-    bar_format = (
-        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
-        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
-        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
+    total = len(entries)
+
+    def fn_entry(index):
+        entry = entries[index]
+
+        entry_text = f_text(
+            env_size=env_size,
+            max_steps=max_steps,
+            goal=entry["goal"],
+            start=entry["start"],
+            facing=entry["facing"],
+        )
+        entry_image = f_image(
+            env_size=env_size,
+            max_steps=max_steps,
+            goal=entry["goal"],
+            start=entry["start"],
+            facing=entry["facing"],
+            image=image,
+        )
+
+        return {
+            "goal": entry["goal"],
+            "start": entry["start"],
+            "facing": entry["facing"],
+            "text": entry_text,
+            "image": entry_image,
+            "token": entry["action"],
+        }
+
+    entries = f_data(
+        desc=f"Scan seed",
+        callback=fn_entry,
+        total=total,
     )
+    assert len(entries) == total
+
+    entries = f_data(
+        desc=f"Scan step",
+        callback=functools.partial(fn_observe, entries, env_size, max_steps),
+        total=total,
+    )
+    assert len(entries) == total
 
     os.makedirs(data, exist_ok=True)
-
+    statistics = {choice: 0 for choice in state_space}
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
@@ -824,48 +762,25 @@ def run_spin(seed, data, image, max_steps):
             )
             for choice in state_space
         }
-        with open(seed, "r") as g:
-            with tqdm(
-                total=total,
-                desc=f"Seed entry",
-                dynamic_ncols=True,
-                bar_format=bar_format,
-                unit="seed",
-            ) as progress:
-                for line in g:
-                    if line.strip():
-                        progress.update(1)
 
-                        entry = json.loads(line)
+        def fn_statistics(index):
+            entry = entries[index]
+            f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
+            statistics[entry["state"]] += 1
+            return entry
 
-                        state = f_step(
-                            step=f_replay(
-                                env_size=env_size,
-                                max_steps=max_steps,
-                                goal=entry["goal"],
-                                start=entry["start"],
-                                facing=entry["facing"],
-                                action=entry["action"],
-                            ),
-                            max_steps=max_steps,
-                        )
+        entries = f_data(desc=f"Scan save", callback=fn_statistics, total=total)
+        assert len(entries) == total
 
-                        f[state].write(
-                            json.dumps(
-                                f_entry(
-                                    goal=entry["goal"],
-                                    start=entry["start"],
-                                    facing=entry["facing"],
-                                    image=image,
-                                    env_size=env_size,
-                                    max_steps=max_steps,
-                                    action=entry["action"],
-                                    state=state,
-                                ),
-                                sort_keys=True,
-                            )
-                            + "\n"
-                        )
+    print(
+        "Statistics: "
+        + "["
+        + ", ".join(
+            f"{choice}:{statistics[choice]} ({os.path.join(data, f'seed.{choice}.data')})"
+            for choice in state_space
+        )
+        + "]"
+    )
 
     info = {
         "env": env_size,
@@ -1020,14 +935,63 @@ def run_explore(data, image, total, device):
                 os.path.join(data, f"data.{choice}.{1:03d}.data"),
             )
 
-    total_width = len(str(total))
-    bar_format = (
-        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
-        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
-        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
-    )
+    def fn_entry(index):
 
-    statistics = {state: 0 for state in state_space}
+        while True:
+            goal = (
+                random.randint(1, info["env"] - 2),
+                random.randint(1, info["env"] - 2),
+            )
+            start = (
+                random.randint(1, info["env"] - 2),
+                random.randint(1, info["env"] - 2),
+            )
+            if goal != start:
+                break
+        facing = random.choice(facing_space)
+        return {"goal": goal, "start": start, "facing": facing}
+
+    entries = f_data(desc=f"Data entries", callback=fn_entry, total=total)
+    assert len(entries) == total
+
+    @functools.lru_cache(maxsize=None)
+    def f_prefix(entry_text, entry_image):
+        return encoder.encode(
+            text=entry_text, image=tuple(os.path.join(image, e) for e in entry_image)
+        ).numpy()
+
+    entries = f_data(
+        desc=f"Data process",
+        callback=functools.partial(fn_prefix, entries, info, image, f_prefix),
+        total=total,
+    )
+    assert len(entries) == total
+
+    f_prefix.cache_clear()
+
+    def fn_explore(prefix):
+        return explore(
+            model=model,
+            prefix=prefix,
+            maximum=info["max"],
+            device=device,
+        )
+
+    entries = f_data(
+        desc=f"Data explore",
+        callback=functools.partial(fn_inference, entries, fn_explore, info["vocab"]),
+        total=total,
+    )
+    assert len(entries) == total
+
+    entries = f_data(
+        desc=f"Data observe",
+        callback=functools.partial(fn_observe, entries, info["env"], info["max"]),
+        total=total,
+    )
+    assert len(entries) == total
+
+    statistics = {choice: 0 for choice in state_space}
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
@@ -1035,46 +999,23 @@ def run_explore(data, image, total, device):
             )
             for choice in state_space
         }
-        with tqdm(
-            total=total,
-            desc=f"Data entry",
-            dynamic_ncols=True,
-            unit="data",
-            bar_format=bar_format,
-        ) as progress:
-            for index in range(total):
-                while True:
-                    goal = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
-                    )
-                    start = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
-                    )
-                    if goal != start:
-                        break
-                facing = random.choice(facing_space)
 
-                entry = f_explore(
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    image=image,
-                    encoder=encoder,
-                    info=info,
-                    model=model,
-                    device=device,
-                )
+        def fn_statistics(index):
+            entry = entries[index]
+            f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
+            statistics[entry["state"]] += 1
+            return entry
 
-                f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
-                statistics[entry["state"]] += 1
+        entries = f_data(desc=f"Scan save", callback=fn_statistics, total=total)
+        assert len(entries) == total
 
-                progress.update(1)
     print(
         "Statistics: "
         + "["
-        + ", ".join(f"{k}:{statistics[k]}" for k in sorted(statistics))
+        + ", ".join(
+            f"{choice}:{statistics[choice]} ({os.path.join(data, f'data.{choice}.data')})"
+            for choice in state_space
+        )
         + "]"
     )
 
@@ -1195,21 +1136,59 @@ def run_play(goal, start, facing, model, device):
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
+    total = 1
+
+    def fn_entry(index):
+        return {"goal": goal, "start": start, "facing": facing}
+
+    entries = f_data(desc=f"Play entries", callback=fn_entry, total=total)
+    assert len(entries) == total
+
     with tempfile.TemporaryDirectory() as image:
-        entry = f_sequence(
-            goal=goal,
-            start=start,
-            facing=facing,
-            image=image,
-            encoder=encoder,
-            info=info,
+
+        @functools.lru_cache(maxsize=None)
+        def f_prefix(entry_text, entry_image):
+            return encoder.encode(
+                text=entry_text,
+                image=tuple(os.path.join(image, e) for e in entry_image),
+            ).numpy()
+
+        entries = f_data(
+            desc=f"Play process",
+            callback=functools.partial(fn_prefix, entries, info, image, f_prefix),
+            total=total,
+        )
+        assert len(entries) == total
+
+        f_prefix.cache_clear()
+
+    def fn_predict(prefix):
+        return sequence(
             model=model,
+            reduce=lambda logit: logit[0] - logit[1],  # success - failure
+            prefix=prefix,
+            maximum=info["max"],
             device=device,
         )
 
+    entries = f_data(
+        desc=f"Play predict",
+        callback=functools.partial(fn_inference, entries, fn_predict, info["vocab"]),
+        total=total,
+    )
+    assert len(entries) == total
+
+    entries = f_data(
+        desc=f"Play observe",
+        callback=functools.partial(fn_observe, entries, info["env"], info["max"]),
+        total=total,
+    )
+    assert len(entries) == total
+
+    for entry in entries:
         state, action = entry["state"], entry["token"]
 
-    print(f"Play model: ({state}) {action}")
+        print(f"Play model: ({state}) {action}")
 
 
 def main():

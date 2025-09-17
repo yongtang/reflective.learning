@@ -120,7 +120,8 @@ def train(
     total,
     callback,
     device,
-    rank: int = 0,
+    rank,
+    desc,
 ):
     """
     Trains the model using a streaming loader
@@ -133,7 +134,8 @@ def train(
         callback: A function called periodically during training.
         device: Device for this rank (required). Model is assumed already on this device
                 and may already be wrapped in DistributedDataParallel by the caller.
-        rank: Optional global rank used only to disable tqdm on nonzero ranks.
+        rank: Global rank used only to disable tqdm on nonzero ranks.
+        desc: Description for tqdm.
     """
 
     loss_width = 10
@@ -148,7 +150,7 @@ def train(
 
     with tqdm(
         total=total,
-        desc="Learn",
+        desc=desc,
         dynamic_ncols=True,
         bar_format=bar_format,
         unit="sample",

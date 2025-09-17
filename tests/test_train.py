@@ -61,6 +61,8 @@ def test_train_sanity():
             total=20,
             callback=f_callback,
             device=torch.device("cpu"),
+            rank=0,
+            desc="Train",
         )
         assert os.path.exists(os.path.join(tmpdir, "model.pt"))
     finally:
