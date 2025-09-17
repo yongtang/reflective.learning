@@ -1,4 +1,5 @@
 import argparse
+import base64
 import collections
 import contextlib
 import functools
@@ -197,28 +198,6 @@ def f_image(env_size, max_steps, goal, start, facing, image):
         img = f_render(env_size, max_steps, goal, start, facing)
         PIL.Image.fromarray(img).save(os.path.join(image, filename))
     return [filename]
-
-
-def f_entry(goal, start, facing, image, env_size, max_steps, action, state):
-    return {
-        "text": f_text(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-        ),
-        "image": f_image(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-            image=image,
-        ),
-        "token": action,
-        "state": state,
-    }
 
 
 def f_sequence(
@@ -434,7 +413,7 @@ def f_prefix(entry_text, entry_image, encoder, image):
     return encoder.encode_embed(text=text_embed, image=image_embed)
 
 
-def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
+def f_datum(vocab_fn, state_fn, max_steps, dimension, entry):
     assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
 
     token = torch.tensor(
@@ -445,12 +424,11 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
         state_fn(entry["state"]),
         dtype=torch.long,
     )
-
-    prefix = f_prefix(
-        entry_text=entry["text"],
-        entry_image=entry["image"],
-        encoder=encoder,
-        image=image,
+    prefix = torch.tensor(
+        np.frombuffer(
+            base64.b64decode(entry["prefix"]),
+            dtype=np.float32,
+        ).reshape([-1, dimension])
     )
 
     return {
@@ -479,7 +457,7 @@ def f_scan(file, callback):
     return total
 
 
-def f_data(callback, total):
+def f_data(total, callback):
     total_width = len(str(total))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
@@ -489,7 +467,7 @@ def f_data(callback, total):
 
     with tqdm(
         total=total,
-        desc=f"Data {file}",
+        desc=f"Data",
         dynamic_ncols=True,
         unit="data",
         bar_format=bar_format,
@@ -500,7 +478,7 @@ def f_data(callback, total):
 
 
 def f_dataset(file, choice):
-    entries = defaultdict(list)
+    entries = collections.defaultdict(list)
 
     def fn(offset, line):
         entry = json.loads(line)
@@ -607,8 +585,7 @@ def f_learn(
             vocab_fn=lambda e: info["vocab"][e],
             state_fn=lambda e: state_space.index(e),
             max_steps=info["max"],
-            image=image,
-            encoder=encoder,
+            dimension=info["layer"]["d_model"],
         ),
         data=data,
     ) as dataset:
@@ -688,8 +665,7 @@ def f_finetune(
             vocab_fn=lambda e: info["vocab"][e],
             state_fn=lambda e: state_space.index(e),
             max_steps=info["max"],
-            image=image,
-            encoder=encoder,
+            dimension=info["layer"]["d_model"],
         ),
         data=data,
     ) as dataset:
@@ -755,8 +731,8 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                         random.randint(1, env_size - 2),
                         random.randint(1, env_size - 2),
                     )
-                if list(goal) == list(start):
-                    continue  # skip invalid seed
+                if goal != start:
+                    break
             entry = {
                 "env": env_size,
                 "goal": goal,
@@ -764,12 +740,12 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
                 "facing": facing,
                 "action": action,
             }
-            f.write(json.dumps(seed, sort_keys=True) + "\n")
+            f.write(json.dumps(entry, sort_keys=True) + "\n")
 
         f_data(num_seeds, fn_seed)
 
 
-def run_spin(seed, data, image, max_steps):
+def run_spin(seed, data, image, max_steps, device):
     total = 0
     steps = set()
     env_size = set()
@@ -792,49 +768,6 @@ def run_spin(seed, data, image, max_steps):
     assert max(steps) <= max_steps, f"{sorted(steps)}"
     assert len(env_size) == 1, f"{env_size}"
     env_size = next(iter(env_size))
-
-    os.makedirs(data, exist_ok=True)
-    with contextlib.ExitStack() as stack:
-        f = {
-            choice: stack.enter_context(
-                open(os.path.join(data, f"seed.{choice}.data"), "w")
-            )
-            for choice in state_space
-        }
-
-        def fn_entry(offset, line):
-            entry = json.loads(line)
-
-            state = f_step(
-                step=f_replay(
-                    env_size=env_size,
-                    max_steps=max_steps,
-                    goal=entry["goal"],
-                    start=entry["start"],
-                    facing=entry["facing"],
-                    action=entry["action"],
-                ),
-                max_steps=max_steps,
-            )
-
-            f[state].write(
-                json.dumps(
-                    f_entry(
-                        goal=entry["goal"],
-                        start=entry["start"],
-                        facing=entry["facing"],
-                        image=image,
-                        env_size=env_size,
-                        max_steps=max_steps,
-                        action=entry["action"],
-                        state=state,
-                    ),
-                    sort_keys=True,
-                )
-                + "\n"
-            )
-
-        f_scan(seed, fn_entry)
 
     info = {
         "env": env_size,
@@ -861,6 +794,97 @@ def run_spin(seed, data, image, max_steps):
             "transformers": "4.50.0",
         },
     }
+
+    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+
+    os.makedirs(data, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as directory:
+        with open(os.path.join(directory, f"data.chunk"), "w") as f:
+
+            def fn_chunk(offset, line):
+                entry = json.loads(line)
+                entry_text = f_text(
+                    env_size=env_size,
+                    max_steps=max_steps,
+                    goal=entry["goal"],
+                    start=entry["start"],
+                    facing=entry["facing"],
+                )
+                entry_image = f_image(
+                    env_size=env_size,
+                    max_steps=max_steps,
+                    goal=entry["goal"],
+                    start=entry["start"],
+                    facing=entry["facing"],
+                    image=image,
+                )
+                entry_prefix = f_prefix(entry_text, entry_image, encoder, image)
+                assert (
+                    entry_prefix.dim() == 2
+                    and entry_prefix.shape[1] == info["layer"]["d_model"]
+                )
+
+                f.write(
+                    json.dumps(
+                        {
+                            "goal": entry["goal"],
+                            "start": entry["start"],
+                            "facing": entry["facing"],
+                            "action": entry["action"],
+                            "text": entry_text,
+                            "image": entry_image,
+                            "prefix": base64.b64encode(
+                                entry_prefix.numpy().tobytes()
+                            ).decode("utf-8"),
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
+
+            f_scan(seed, fn_chunk)
+
+        with contextlib.ExitStack() as stack:
+            f = {
+                choice: stack.enter_context(
+                    open(os.path.join(data, f"seed.{choice}.data"), "w")
+                )
+                for choice in state_space
+            }
+
+            def fn_entry(offset, line):
+                entry = json.loads(line)
+
+                state = f_step(
+                    step=f_replay(
+                        env_size=env_size,
+                        max_steps=max_steps,
+                        goal=entry["goal"],
+                        start=entry["start"],
+                        facing=entry["facing"],
+                        action=entry["action"],
+                    ),
+                    max_steps=max_steps,
+                )
+
+                f[state].write(
+                    json.dumps(
+                        {
+                            "text": entry["text"],
+                            "image": entry["image"],
+                            "prefix": entry["prefix"],
+                            "token": entry["action"],
+                            "state": state,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
+
+            f_scan(os.path.join(directory, f"data.chunk"), fn_entry)
 
     torch.save(
         {
@@ -1203,6 +1227,7 @@ def main():
     spin_parser.add_argument("--data", required=True)
     spin_parser.add_argument("--image", required=True)
     spin_parser.add_argument("--max-steps", type=int, required=True)
+    spin_parser.add_argument("--device")
 
     # ---- learn mode ----
     learn_parser = subparsers.add_parser("learn", help="Learn mode")
@@ -1257,6 +1282,7 @@ def main():
             data=args.data,
             image=args.image,
             max_steps=args.max_steps,
+            device=args.device,
         )
 
     elif args.mode == "learn":
