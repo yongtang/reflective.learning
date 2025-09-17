@@ -3,6 +3,35 @@ import torch
 from reflective_learning.model import autocast
 
 
+@torch.inference_mode()
+def sequence_step(
+    model,
+    reduce,
+    prefix,
+    token,
+    length,
+    device,
+    generator,
+):
+    data = token[:length]  # current sequence view
+
+    # run model forwards under autocast; keep softmax math in fp32
+    with autocast():
+        logit = tuple(e.call(data, prefix) for e in model)  # M x [V]
+    logit = reduce(logit).float()  # [V]
+
+    # guard against NaN/Inf for this step only
+    if not torch.isfinite(logit).all():
+        probs = torch.full_like(logit, 1.0 / logit.numel())
+    else:
+        probs = torch.softmax(logit, dim=0)  # [V]
+
+    prediction = torch.multinomial(probs, num_samples=1, generator=generator)  # [1]
+
+    return prediction
+
+
+@torch.inference_mode()
 def sequence(
     model,
     reduce,
@@ -37,22 +66,9 @@ def sequence(
         token = torch.empty(maximum, dtype=torch.long, device=device)  # [maximum]
 
         for length in range(maximum):
-            data = token[:length]  # current sequence view
-
-            # run model forwards under autocast; keep softmax math in fp32
-            with autocast():
-                logit = tuple(e.call(data, prefix) for e in model)  # M x [V]
-            logit = reduce(logit).float()  # [V]
-
-            # guard against NaN/Inf for this step only
-            if not torch.isfinite(logit).all():
-                probs = torch.full_like(logit, 1.0 / logit.numel())
-            else:
-                probs = torch.softmax(logit, dim=0)  # [V]
-
-            prediction = torch.multinomial(
-                probs, num_samples=1, generator=generator
-            )  # [1]
+            prediction = sequence_step(
+                model, reduce, prefix, token, length, device, generator
+            )
             token[length] = prediction.item()
 
             if prediction.item() == 0:
@@ -61,6 +77,43 @@ def sequence(
         return token[: length + 1]  # [T]
 
 
+@torch.inference_mode()
+def explore_step(model, prefix, token, length, S, device, generator):
+    data = token[:length]
+
+    # Collect next-token logits from each model independently: shape [M, V].
+    with autocast():
+        logit = torch.stack([e.call(data, prefix) for e in model], dim=0)  # [M, V]
+
+    # Bayes-balanced mixing weights:
+    #   weight_k proportional to exp(-S_k)  =>  weight = softmax(-S)
+    weight = torch.softmax(-S, dim=0)  # [M]
+
+    # Next-token distribution from Bayes-balanced mixed logits:
+    # probs = softmax( sum_k weight_k * logit_k )
+    mixed = (weight[:, None] * logit).sum(dim=0)  # [V]
+    # Safety: if any sub-model produced NaN/Inf logits this step, avoid propagating
+    # to softmax/multinomial; fall back to uniform for this token only.
+    if not torch.isfinite(mixed).all():
+        probs = torch.full_like(mixed, 1.0 / mixed.numel())
+    else:
+        probs = torch.softmax(mixed, dim=0)  # [V]
+
+    prediction = torch.multinomial(probs, num_samples=1, generator=generator)  # [1]
+
+    # Update S_k with the log-prob each model assigned to the single sampled token.
+    # log_softmax(logit)[k, prediction] selects the same token column for all models.
+    logp = torch.log_softmax(logit, dim=-1)  # [M, V]
+    logp_k = logp[:, prediction].squeeze(1)  # [M]
+    # Keep S finite even if a model hard-masks a token (e.g., -inf logit at sampled index).
+    # In normal cases this clamp never activates (threshold is far below typical values).
+    logp_k = torch.clamp(logp_k, min=-30.0)
+    S = S + logp_k  # [M]
+
+    return prediction, S
+
+
+@torch.inference_mode()
 def explore(
     model,
     prefix: torch.Tensor,  # [C, D]
@@ -121,41 +174,11 @@ def explore(
         S = torch.zeros(len(model), device=device)
 
         for length in range(maximum):
-            data = token[:length]
+            prediction, S = explore_step(
+                model, prefix, token, length, S, device, generator
+            )
 
-            # Collect next-token logits from each model independently: shape [M, V].
-            with autocast():
-                logit = torch.stack(
-                    [e.call(data, prefix) for e in model], dim=0
-                )  # [M, V]
-
-            # Bayes-balanced mixing weights:
-            #   weight_k proportional to exp(-S_k)  =>  weight = softmax(-S)
-            weight = torch.softmax(-S, dim=0)  # [M]
-
-            # Next-token distribution from Bayes-balanced mixed logits:
-            # probs = softmax( sum_k weight_k * logit_k )
-            mixed = (weight[:, None] * logit).sum(dim=0)  # [V]
-            # Safety: if any sub-model produced NaN/Inf logits this step, avoid propagating
-            # to softmax/multinomial; fall back to uniform for this token only.
-            if not torch.isfinite(mixed).all():
-                probs = torch.full_like(mixed, 1.0 / mixed.numel())
-            else:
-                probs = torch.softmax(mixed, dim=0)  # [V]
-
-            prediction = torch.multinomial(
-                probs, num_samples=1, generator=generator
-            )  # [1]
             token[length] = prediction.item()
-
-            # Update S_k with the log-prob each model assigned to the single sampled token.
-            # log_softmax(logit)[k, prediction] selects the same token column for all models.
-            logp = torch.log_softmax(logit, dim=-1)  # [M, V]
-            logp_k = logp[:, prediction].squeeze(1)  # [M]
-            # Keep S finite even if a model hard-masks a token (e.g., -inf logit at sampled index).
-            # In normal cases this clamp never activates (threshold is far below typical values).
-            logp_k = torch.clamp(logp_k, min=-30.0)
-            S = S + logp_k  # [M]
 
             # Early stop on STOP token (assumed id 0).
             if prediction.item() == 0:
