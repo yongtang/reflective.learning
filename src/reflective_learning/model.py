@@ -89,7 +89,7 @@ class ReflectiveCore(nn.Module):
         mask = torch.ones(1, C + T, dtype=torch.bool, device=value.device)  # [1, C+T]
 
         # Call transformer
-        logit = self.forward(mask=mask, embed=value)  # [1, C+T, V]
+        logit = self(mask=mask, embed=value)  # [1, C+T, V]
 
         # Return logits for final token position
         return logit[0, -1]  # [V]

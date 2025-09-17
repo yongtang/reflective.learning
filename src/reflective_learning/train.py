@@ -29,7 +29,7 @@ def prob(model, mask, embed, token, index):
             logP_b = sum_t valid_{b,t} * logp_{b,t}
     """
     # Run the transformer to get logits at every position
-    logit = model.forward(mask=mask, embed=embed)  # [B, L, V]
+    logit = model(mask=mask, embed=embed)  # [B, L, V]
     B, L, V = logit.shape
     T = token.size(1)
 
@@ -175,7 +175,7 @@ def train(
 
             # Forward pass (model returns [B, L, V])
             with autocast():
-                logit = model.forward(mask=mask, embed=embed)  # [B, L, V]
+                logit = model(mask=mask, embed=embed)  # [B, L, V]
                 loss = loss_fn(
                     logit=logit.float(),  # keep loss math in fp32 under autocast
                     token=token,
