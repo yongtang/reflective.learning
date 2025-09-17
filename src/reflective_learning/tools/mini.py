@@ -1066,22 +1066,6 @@ def run_explore(data, image, total, device):
                     model=model,
                     device=device,
                 )
-                token = torch.tensor(
-                    [info["vocab"][e] for e in entry["token"]],
-                    dtype=torch.long,
-                )
-                prefix = f_prefix(
-                    entry_text=entry["text"],
-                    entry_image=entry["image"],
-                    encoder=encoder,
-                    image=image,
-                )
-                entry = {
-                    "text": entry["text"],
-                    "image": entry["image"],
-                    "token": entry["token"],
-                    "state": entry["state"],
-                }
 
                 f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
                 statistics[entry["state"]] += 1
@@ -1341,14 +1325,6 @@ def main():
             lr=args.lr,
             device=args.device,
             distributed=True,
-        )
-
-    elif args.mode == "explore":
-        run_explore(
-            data=args.data,
-            image=args.image,
-            total=args.total,
-            device=args.device,
         )
 
     elif args.mode == "play":
