@@ -460,6 +460,47 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     }
 
 
+def f_chunk(
+    goal,
+    start,
+    facing,
+    image,
+    encoder,
+    info,
+):
+
+    env_size, max_steps = info["env"], info["max"]
+
+    entry_text = f_text(
+        env_size=env_size,
+        max_steps=max_steps,
+        goal=goal,
+        start=start,
+        facing=facing,
+    )
+
+    entry_image = f_image(
+        env_size=env_size,
+        max_steps=max_steps,
+        goal=goal,
+        start=start,
+        facing=facing,
+        image=image,
+    )
+
+    prefix = f_prefix(
+        entry_text=entry_text,
+        entry_image=entry_image,
+        encoder=encoder,
+        image=image,
+    )
+    return {
+        "text": entry_text,
+        "image": entry_image,
+        "prefix": base64.b64encode(prefix.numpy().tobytes()).decode("utf-8"),
+    }
+
+
 def f_dataset(file, choice):
     if not os.path.isfile(file):
         return {}
@@ -1028,65 +1069,81 @@ def run_explore(data, image, total, device):
     )
 
     statistics = {state: 0 for state in state_space}
-    with contextlib.ExitStack() as stack:
-        f = {
-            choice: stack.enter_context(
-                open(os.path.join(data, f"data.{choice}.data"), "w")
-            )
-            for choice in state_space
-        }
-        with tqdm(
-            total=total,
-            desc=f"Data entry",
-            dynamic_ncols=True,
-            unit="data",
-            bar_format=bar_format,
-        ) as progress:
-            for index in range(total):
-                while True:
-                    goal = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
+    with tempfile.TemporaryDirectory() as g:
+        with open(os.path.join(g, f"chunk.0"), "w") as f:
+            with tqdm(
+                total=total,
+                desc=f"Data chunk",
+                dynamic_ncols=True,
+                unit="data",
+                bar_format=bar_format,
+            ) as progress:
+                for index in range(total):
+                    while True:
+                        goal = (
+                            random.randint(1, info["env"] - 2),
+                            random.randint(1, info["env"] - 2),
+                        )
+                        start = (
+                            random.randint(1, info["env"] - 2),
+                            random.randint(1, info["env"] - 2),
+                        )
+                        if goal != start:
+                            break
+                    facing = random.choice(facing_space)
+
+                    chunk = f_chunk(
+                        goal=goal,
+                        start=start,
+                        facing=facing,
+                        image=image,
+                        encoder=encoder,
+                        info=info,
                     )
-                    start = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
+                    f.write(json.dumps(chunk, sort_keys=True) + "\n")
+
+                    progress.update(1)
+
+        with contextlib.ExitStack() as stack:
+            f = {
+                choice: stack.enter_context(
+                    open(os.path.join(data, f"data.{choice}.data"), "w")
+                )
+                for choice in state_space
+            } | {"chunk": stack.enter_context(open(os.path.join(g, f"chunk.0"), "r"))}
+            with tqdm(
+                total=total,
+                desc=f"Data entry",
+                dynamic_ncols=True,
+                unit="data",
+                bar_format=bar_format,
+            ) as progress:
+                for line in f[chunk].read():
+                    if not line.strip():
+                        continue
+                    chunk = json.loads(line)
+
+                    entry = f_explore(
+                        goal=goal,
+                        start=start,
+                        facing=facing,
+                        image=image,
+                        encoder=encoder,
+                        info=info,
+                        model=model,
+                        device=device,
                     )
-                    if goal != start:
-                        break
-                facing = random.choice(facing_space)
+                    entry = {
+                        "text": entry["text"],
+                        "image": entry["image"],
+                        "token": entry["token"],
+                        "state": entry["state"],
+                    }
 
-                entry = f_explore(
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    image=image,
-                    encoder=encoder,
-                    info=info,
-                    model=model,
-                    device=device,
-                )
-                token = torch.tensor(
-                    [info["vocab"][e] for e in entry["token"]],
-                    dtype=torch.long,
-                )
-                prefix = f_prefix(
-                    entry_text=entry["text"],
-                    entry_image=entry["image"],
-                    encoder=encoder,
-                    image=image,
-                )
-                entry = {
-                    "text": entry["text"],
-                    "image": entry["image"],
-                    "token": entry["token"],
-                    "state": entry["state"],
-                }
+                    f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
+                    statistics[entry["state"]] += 1
 
-                f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
-                statistics[entry["state"]] += 1
-
-                progress.update(1)
+                    progress.update(1)
     print(
         "Statistics: "
         + "["
