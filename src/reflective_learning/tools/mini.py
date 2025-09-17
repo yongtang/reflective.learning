@@ -255,17 +255,7 @@ def f_sequence(
         step=f_replay(env_size, max_steps, goal, start, facing, action),
         max_steps=max_steps,
     )
-
-    return f_entry(
-        goal=goal,
-        start=start,
-        facing=facing,
-        image=image,
-        env_size=env_size,
-        max_steps=max_steps,
-        action=action,
-        state=state,
-    )
+    return state, action
 
 
 def f_explore(
@@ -414,10 +404,10 @@ def f_prefix(entry_text, entry_image, encoder, image):
 
 
 def f_datum(vocab_fn, state_fn, max_steps, dimension, entry):
-    assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
+    assert len(entry["action"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
 
     token = torch.tensor(
-        [vocab_fn(e) for e in entry["token"]],
+        [vocab_fn(e) for e in entry["action"]],
         dtype=torch.long,
     )
     state = torch.tensor(
@@ -489,7 +479,7 @@ def f_dataset(file, choice):
             },
             sort_keys=True,
         )
-        entries[key].append((offset, len(entry["token"])))
+        entries[key].append((offset, len(entry["action"])))
 
     f_scan(file, fn)
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
@@ -876,7 +866,7 @@ def run_spin(seed, data, image, max_steps, device):
                             "text": entry["text"],
                             "image": entry["image"],
                             "prefix": entry["prefix"],
-                            "token": entry["action"],
+                            "action": entry["action"],
                             "state": state,
                         },
                         sort_keys=True,
@@ -1013,59 +1003,113 @@ def run_explore(data, image, total, device):
                 os.path.join(data, f"data.{choice}.{1:03d}.data"),
             )
 
-    total_width = len(str(total))
-    bar_format = (
-        f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
-        f"{{n:{total_width}d}}/{{total:{total_width}d}} "
-        f"[{{elapsed}}<{{remaining}}, {{rate_fmt}}{{postfix}}]"
-    )
+    with tempfile.TemporaryDirectory() as directory:
+        with open(os.path.join(directory, f"data.chunk.0"), "w") as f:
 
-    statistics = {state: 0 for state in state_space}
-    with contextlib.ExitStack() as stack:
-        f = {
-            choice: stack.enter_context(
-                open(os.path.join(data, f"data.{choice}.data"), "w")
-            )
-            for choice in state_space
-        }
+            def fn_chunk(index):
 
-        def fn(index):
+                while True:
+                    goal = (
+                        random.randint(1, info["env"] - 2),
+                        random.randint(1, info["env"] - 2),
+                    )
+                    start = (
+                        random.randint(1, info["env"] - 2),
+                        random.randint(1, info["env"] - 2),
+                    )
+                    if goal != start:
+                        break
+                facing = random.choice(facing_space)
 
-            while True:
-                goal = (
-                    random.randint(1, info["env"] - 2),
-                    random.randint(1, info["env"] - 2),
+                entry_text = f_text(
+                    env_size=info["env"],
+                    max_steps=info["max"],
+                    goal=goal,
+                    start=start,
+                    facing=facing,
                 )
-                start = (
-                    random.randint(1, info["env"] - 2),
-                    random.randint(1, info["env"] - 2),
+                entry_image = f_image(
+                    env_size=info["env"],
+                    max_steps=info["max"],
+                    goal=goal,
+                    start=start,
+                    facing=facing,
+                    image=image,
                 )
-                if goal != start:
-                    break
-            facing = random.choice(facing_space)
+                entry_prefix = f_prefix(entry_text, entry_image, encoder, image)
+                assert (
+                    entry_prefix.dim() == 2
+                    and entry_prefix.shape[1] == info["layer"]["d_model"]
+                )
 
-            entry = f_explore(
-                goal=goal,
-                start=start,
-                facing=facing,
-                image=image,
-                encoder=encoder,
-                info=info,
-                model=model,
-                device=device,
-            )
+                f.write(
+                    json.dumps(
+                        {
+                            "goal": goal,
+                            "start": start,
+                            "facing": facing,
+                            "action": [],
+                            "text": entry_text,
+                            "image": entry_image,
+                            "prefix": base64.b64encode(
+                                entry_prefix.numpy().tobytes()
+                            ).decode("utf-8"),
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
 
-            f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
-            statistics[entry["state"]] += 1
+            f_data(total, fn_chunk)
 
-        f_data(total, callback)
+        for step in range(info["max"]):
+            with open(os.path.join(directory, f"data.chunk.{step+1}"), "w") as f:
 
-    print(
-        "Statistics: "
-        + "["
-        + ", ".join(f"{k}:{statistics[k]}" for k in sorted(statistics))
-        + "]"
-    )
+                def fn_value(offset, line):
+                    entry = json.loads(line)
+                    f.write(
+                        json.dumps(
+                            {
+                                "goal": entry["goal"],
+                                "start": entry["start"],
+                                "facing": entry["facing"],
+                                "action": entry["action"] + [],
+                                "text": entry["text"],
+                                "image": entry["image"],
+                                "prefix": entry["prefix"],
+                            },
+                            sort_keys=True,
+                        )
+                        + "\n"
+                    )
+
+                f_scan(os.path.join(directory, f"data.chunk.{step}"), fn_value)
+
+        statistics = {state: 0 for state in state_space}
+        with contextlib.ExitStack() as stack:
+            f = {
+                choice: stack.enter_context(
+                    open(os.path.join(data, f"data.{choice}.data"), "w")
+                )
+                for choice in state_space
+            }
+
+            def fn_entry(offset, line):
+                entry = json.loads(line)
+
+                f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
+                statistics[entry["state"]] += 1
+
+            for step in range(info["max"]):
+
+                f_scan(os.path.join(directory, f"data.chunk.{step+1}"), fn_entry)
+
+        print(
+            "Statistics: "
+            + "["
+            + ", ".join(f"{k}:{statistics[k]}" for k in sorted(statistics))
+            + "]"
+        )
 
     return
 
@@ -1185,7 +1229,7 @@ def run_play(goal, start, facing, model, device):
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     with tempfile.TemporaryDirectory() as image:
-        entry = f_sequence(
+        state, action = f_sequence(
             goal=goal,
             start=start,
             facing=facing,
@@ -1196,7 +1240,7 @@ def run_play(goal, start, facing, model, device):
             device=device,
         )
 
-        state, action = entry["state"], entry["token"]
+        state, action = entry["state"], entry["action"]
 
     print(f"Play model: ({state}) {action}")
 
