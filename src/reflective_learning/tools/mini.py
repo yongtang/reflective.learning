@@ -485,6 +485,66 @@ def f_dataset(file, choice):
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
+def f_chunk(total, directory, info, encoder, image):
+    with open(os.path.join(directory, f"data.chunk.0"), "w") as f:
+
+        def fn_chunk(index):
+
+            while True:
+                goal = (
+                    random.randint(1, info["env"] - 2),
+                    random.randint(1, info["env"] - 2),
+                )
+                start = (
+                    random.randint(1, info["env"] - 2),
+                    random.randint(1, info["env"] - 2),
+                )
+                if goal != start:
+                    break
+            facing = random.choice(facing_space)
+
+            entry_text = f_text(
+                env_size=info["env"],
+                max_steps=info["max"],
+                goal=goal,
+                start=start,
+                facing=facing,
+            )
+            entry_image = f_image(
+                env_size=info["env"],
+                max_steps=info["max"],
+                goal=goal,
+                start=start,
+                facing=facing,
+                image=image,
+            )
+            entry_prefix = f_prefix(entry_text, entry_image, encoder, image)
+            assert (
+                entry_prefix.dim() == 2
+                and entry_prefix.shape[1] == info["layer"]["d_model"]
+            )
+
+            f.write(
+                json.dumps(
+                    {
+                        "goal": goal,
+                        "start": start,
+                        "facing": facing,
+                        "action": [],
+                        "text": entry_text,
+                        "image": entry_image,
+                        "prefix": base64.b64encode(
+                            entry_prefix.numpy().tobytes()
+                        ).decode("utf-8"),
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+
+        f_data(total, fn_chunk)
+
+
 class LearnDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, datum_fn, data):
         super().__init__()
@@ -1004,63 +1064,9 @@ def run_explore(data, image, total, device):
             )
 
     with tempfile.TemporaryDirectory() as directory:
-        with open(os.path.join(directory, f"data.chunk.0"), "w") as f:
-
-            def fn_chunk(index):
-
-                while True:
-                    goal = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
-                    )
-                    start = (
-                        random.randint(1, info["env"] - 2),
-                        random.randint(1, info["env"] - 2),
-                    )
-                    if goal != start:
-                        break
-                facing = random.choice(facing_space)
-
-                entry_text = f_text(
-                    env_size=info["env"],
-                    max_steps=info["max"],
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                )
-                entry_image = f_image(
-                    env_size=info["env"],
-                    max_steps=info["max"],
-                    goal=goal,
-                    start=start,
-                    facing=facing,
-                    image=image,
-                )
-                entry_prefix = f_prefix(entry_text, entry_image, encoder, image)
-                assert (
-                    entry_prefix.dim() == 2
-                    and entry_prefix.shape[1] == info["layer"]["d_model"]
-                )
-
-                f.write(
-                    json.dumps(
-                        {
-                            "goal": goal,
-                            "start": start,
-                            "facing": facing,
-                            "action": [],
-                            "text": entry_text,
-                            "image": entry_image,
-                            "prefix": base64.b64encode(
-                                entry_prefix.numpy().tobytes()
-                            ).decode("utf-8"),
-                        },
-                        sort_keys=True,
-                    )
-                    + "\n"
-                )
-
-            f_data(total, fn_chunk)
+        f_chunk(
+            total=total, info=info, encoder=encoder, image=image, directory=directory
+        )
 
         for step in range(info["max"]):
             with open(os.path.join(directory, f"data.chunk.{step+1}"), "w") as f:
@@ -1217,7 +1223,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
             )
 
 
-def run_play(goal, start, facing, model, device):
+def run_play(goal, start, facing, model, total, device):
     print(f"Load model: {model}")
 
     load = torch.load(model, map_location="cpu")
@@ -1228,7 +1234,15 @@ def run_play(goal, start, facing, model, device):
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    with tempfile.TemporaryDirectory() as image:
+    with tempfile.TemporaryDirectory() as directory:
+        f_chunk(
+            total=total,
+            info=info,
+            encoder=encoder,
+            image=os.path.join(directory, "image"),
+            directory=directory,
+        )
+
         state, action = f_sequence(
             goal=goal,
             start=start,
