@@ -485,7 +485,31 @@ def f_dataset(file, choice):
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
-def f_chunk(total, directory, info, encoder, image):
+def f_value(step, function, directory):
+    with open(os.path.join(directory, f"data.chunk.{step+1}"), "w") as f:
+
+        def fn_value(offset, line):
+            entry = json.loads(line)
+            f.write(
+                json.dumps(
+                    {
+                        "goal": entry["goal"],
+                        "start": entry["start"],
+                        "facing": entry["facing"],
+                        "action": entry["action"] + [],
+                        "text": entry["text"],
+                        "image": entry["image"],
+                        "prefix": entry["prefix"],
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+
+        f_scan(os.path.join(directory, f"data.chunk.{step}"), fn_value)
+
+
+def f_chunk(total, info, encoder, image, directory):
     with open(os.path.join(directory, f"data.chunk.0"), "w") as f:
 
         def fn_chunk(index):
@@ -1065,31 +1089,15 @@ def run_explore(data, image, total, device):
 
     with tempfile.TemporaryDirectory() as directory:
         f_chunk(
-            total=total, info=info, encoder=encoder, image=image, directory=directory
+            total=total,
+            info=info,
+            encoder=encoder,
+            image=image,
+            directory=directory,
         )
 
         for step in range(info["max"]):
-            with open(os.path.join(directory, f"data.chunk.{step+1}"), "w") as f:
-
-                def fn_value(offset, line):
-                    entry = json.loads(line)
-                    f.write(
-                        json.dumps(
-                            {
-                                "goal": entry["goal"],
-                                "start": entry["start"],
-                                "facing": entry["facing"],
-                                "action": entry["action"] + [],
-                                "text": entry["text"],
-                                "image": entry["image"],
-                                "prefix": entry["prefix"],
-                            },
-                            sort_keys=True,
-                        )
-                        + "\n"
-                    )
-
-                f_scan(os.path.join(directory, f"data.chunk.{step}"), fn_value)
+            f_value(step=step, directory=directory, function=f_sequence)
 
         statistics = {state: 0 for state in state_space}
         with contextlib.ExitStack() as stack:
@@ -1242,21 +1250,17 @@ def run_play(goal, start, facing, model, total, device):
             image=os.path.join(directory, "image"),
             directory=directory,
         )
+        for step in range(info["max"]):
+            f_value(
+                step=step,
+                directory=directory,
+                function=f_sequence,
+            )
 
-        state, action = f_sequence(
-            goal=goal,
-            start=start,
-            facing=facing,
-            image=image,
-            encoder=encoder,
-            info=info,
-            model=model,
-            device=device,
-        )
-
+        f_scan()
         state, action = entry["state"], entry["action"]
 
-    print(f"Play model: ({state}) {action}")
+        print(f"Play model: ({state}) {action}")
 
 
 def main():
