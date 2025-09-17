@@ -35,9 +35,8 @@ def sequence(
         prefix = prefix.to(dtype=torch.float32, device=device)
         # preallocate to avoid O(n^2) concatenation; track logical length
         token = torch.empty(maximum, dtype=torch.long, device=device)  # [maximum]
-        length = 0
 
-        for _ in range(maximum):
+        for length in range(maximum):
             data = token[:length]  # current sequence view
 
             # run model forwards under autocast; keep softmax math in fp32
@@ -55,12 +54,11 @@ def sequence(
                 probs, num_samples=1, generator=generator
             )  # [1]
             token[length] = prediction.item()
-            length += 1
 
             if prediction.item() == 0:
                 break
 
-        return token[:length]  # [T]
+        return token[: length + 1]  # [T]
 
 
 def explore(
@@ -117,13 +115,12 @@ def explore(
         prefix = prefix.to(dtype=torch.float32, device=device)
         # preallocate to avoid O(n^2) concatenation; track logical length
         token = torch.empty(maximum, dtype=torch.long, device=device)  # [maximum]
-        length = 0
 
         # Cumulative log-likelihood per model over tokens emitted so far.
         # Initialized to zeros -> uniform prior up to a constant (which cancels in softmax).
         S = torch.zeros(len(model), device=device)
 
-        for _ in range(maximum):
+        for length in range(maximum):
             data = token[:length]
 
             # Collect next-token logits from each model independently: shape [M, V].
@@ -150,7 +147,6 @@ def explore(
                 probs, num_samples=1, generator=generator
             )  # [1]
             token[length] = prediction.item()
-            length += 1
 
             # Update S_k with the log-prob each model assigned to the single sampled token.
             # log_softmax(logit)[k, prediction] selects the same token column for all models.
@@ -165,4 +161,4 @@ def explore(
             if prediction.item() == 0:
                 break
 
-        return token[:length]
+        return token[: length + 1]
