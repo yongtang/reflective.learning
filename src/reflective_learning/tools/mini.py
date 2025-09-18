@@ -258,7 +258,7 @@ def f_sequence(
     return state, action
 
 
-def f_explore(model, max_steps, device, entries):
+def f_explore(model, max_steps, vocab, device, entries):
     token = explore(
         modeli=model,
         batch=entries,
@@ -1081,7 +1081,9 @@ def run_explore(data, image, total, batch, device):
         for step in range(info["max"]):
             f_value(
                 i=os.path.join(directory, f"data.chunk.{step}"),
-                function=f_explore,
+                function=functools.partial(
+                    f_explore, model, info["max"], info["vocab"], device
+                ),
                 o=os.path.join(directory, f"data.chunk.{step+1}"),
                 batch=batch,
             )
