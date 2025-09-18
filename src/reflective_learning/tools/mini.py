@@ -450,7 +450,7 @@ def f_dataset(file, choice):
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
-def f_entry(data, info, file):
+def f_entry(data, info, filter, file):
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
@@ -460,34 +460,34 @@ def f_entry(data, info, file):
         }
 
         def fn_entry(offset, line):
-            entry = json.loads(line)
-
-            state = f_step(
-                step=f_replay(
-                    env_size=info["env"],
+            if filter is None or filter(line):
+                entry = json.loads(line)
+                state = f_step(
+                    step=f_replay(
+                        env_size=info["env"],
+                        max_steps=info["max"],
+                        goal=entry["goal"],
+                        start=entry["start"],
+                        facing=entry["facing"],
+                        action=entry["action"],
+                    ),
                     max_steps=info["max"],
-                    goal=entry["goal"],
-                    start=entry["start"],
-                    facing=entry["facing"],
-                    action=entry["action"],
-                ),
-                max_steps=info["max"],
-            )
-
-            f[state].write(
-                json.dumps(
-                    {
-                        "text": entry["text"],
-                        "image": entry["image"],
-                        "index": entry["index"],
-                        "prefix": entry["prefix"],
-                        "action": entry["action"],
-                        "state": state,
-                    },
-                    sort_keys=True,
                 )
-                + "\n"
-            )
+
+                f[state].write(
+                    json.dumps(
+                        {
+                            "text": entry["text"],
+                            "image": entry["image"],
+                            "index": entry["index"],
+                            "prefix": entry["prefix"],
+                            "action": entry["action"],
+                            "state": state,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
 
         f_scan(file=file, callback=fn_entry, filter=None, batch=None)
 
@@ -940,7 +940,12 @@ def run_spin(seed, data, image, max_steps, device):
 
             f_scan(file=seed, callback=fn_chunk, filter=None, batch=None)
 
-        f_entry(data=data, info=info, file=os.path.join(directory, f"data.chunk"))
+        f_entry(
+            data=data,
+            info=info,
+            filter=None,
+            file=os.path.join(directory, f"data.chunk"),
+        )
 
     torch.save(
         {
@@ -1088,10 +1093,19 @@ def run_explore(data, image, total, batch, device):
                 batch=batch,
             )
 
+        def filter_fn(line):
+            if line.strip():
+                entry = json.loads(line)
+                if entry["action"] and entry["action"][-1] == action_space[0].name:
+                    print("YYYY - ", entry)
+                    return True
+            return False
+
         for step in range(info["max"]):
             f_entry(
                 data=data,
                 info=info,
+                filter=filter_fn,
                 file=os.path.join(directory, f"data.chunk.{step+1}"),
             )
 
