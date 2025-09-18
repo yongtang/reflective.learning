@@ -526,8 +526,8 @@ def f_entry(data, info, file):
         f_scan(file, fn_entry)
 
 
-def f_value(step, function, directory):
-    with open(os.path.join(directory, f"data.chunk.{step+1}"), "w") as f:
+def f_value(i, function, o):
+    with open(o, "w") as f:
 
         def fn_value(offset, line):
             entry = json.loads(line)
@@ -547,11 +547,13 @@ def f_value(step, function, directory):
                 + "\n"
             )
 
-        f_scan(os.path.join(directory, f"data.chunk.{step}"), fn_value)
+        assert False
+
+        f_scan(i, fn_value)
 
 
-def f_chunk(total, info, encoder, image, directory):
-    with open(os.path.join(directory, f"data.chunk.0"), "w") as f:
+def f_chunk(total, info, encoder, image, file):
+    with open(file, "w") as f:
 
         def fn_chunk(index):
 
@@ -583,12 +585,12 @@ def f_chunk(total, info, encoder, image, directory):
                 facing=facing,
                 image=image,
             )
-            entry_prefix = f_prefix(entry_text, entry_image, encoder, image)
-            assert (
-                entry_prefix.dim() == 2
-                and entry_prefix.shape[1] == info["layer"]["d_model"]
+            entry_prefix = f_prefix(
+                entry_text,
+                entry_image,
+                encoder,
+                image,
             )
-
             f.write(
                 json.dumps(
                     {
@@ -598,6 +600,7 @@ def f_chunk(total, info, encoder, image, directory):
                         "action": [],
                         "text": entry_text,
                         "image": entry_image,
+                        "index": entry_prefix.shape[0],
                         "prefix": base64.b64encode(
                             entry_prefix.numpy().tobytes()
                         ).decode("utf-8"),
@@ -1098,14 +1101,14 @@ def run_explore(data, image, total, device):
             info=info,
             encoder=encoder,
             image=image,
-            directory=directory,
+            file=os.path.join(directory, f"data.chunk.0"),
         )
 
         for step in range(info["max"]):
             f_value(
-                step=step,
-                directory=directory,
-                function=f_sequence,
+                i=os.path.join(directory, f"data.chunk.{step}"),
+                function=f_explore,
+                o=os.path.join(directory, f"data.chunk.{step+1}"),
             )
 
         statistics = {state: 0 for state in state_space}
@@ -1257,13 +1260,13 @@ def run_play(goal, start, facing, model, total, device):
             info=info,
             encoder=encoder,
             image=os.path.join(directory, "image"),
-            directory=directory,
+            file=os.path.join(directory, f"data.chunk.0"),
         )
         for step in range(info["max"]):
             f_value(
-                step=step,
-                directory=directory,
+                i=os.path.join(directory, f"data.chunk.{step}"),
                 function=f_sequence,
+                o=os.path.join(directory, f"data.chunk.{step+1}"),
             )
 
         f_scan()
