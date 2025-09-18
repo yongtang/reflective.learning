@@ -418,7 +418,7 @@ def f_datum(vocab_fn, state_fn, max_steps, dimension, entry):
         np.frombuffer(
             base64.b64decode(entry["prefix"]),
             dtype=np.float32,
-        ).reshape([-1, dimension])
+        ).reshape([entry["index"], dimension])
     )
 
     return {
@@ -514,6 +514,7 @@ def f_entry(data, info, file):
                     {
                         "text": entry["text"],
                         "image": entry["image"],
+                        "index": entry["index"],
                         "prefix": entry["prefix"],
                         "action": entry["action"],
                         "state": state,
