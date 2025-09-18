@@ -1304,7 +1304,7 @@ def main():
             interval=args.interval,
             lr=args.lr,
             device=args.device,
-            distributed=True,
+            distributed=False,
         )
 
     elif args.mode == "explore":
@@ -1324,7 +1324,7 @@ def main():
             interval=args.interval,
             lr=args.lr,
             device=args.device,
-            distributed=True,
+            distributed=False,
         )
 
     elif args.mode == "play":
