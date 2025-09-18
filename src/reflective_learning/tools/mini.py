@@ -428,7 +428,7 @@ def f_datum(vocab_fn, state_fn, max_steps, dimension, entry):
     }
 
 
-def f_scan(file, callback):
+def f_scan(file, callback, batch):
     total = 0
     if os.path.isfile(file):
         with open(file, "r") as f:
@@ -439,11 +439,15 @@ def f_scan(file, callback):
                 unit_scale=True,
                 dynamic_ncols=True,
             ) as progress:
-                for line in f:
-                    if line.strip():
-                        callback(progress.n, line) if callback else None
-                        total += 1
-                    progress.update(len(line.encode("utf-8")))
+                n = batch or 1
+                for entries in iter(lambda: list(itertools.islice(f, n)), []):
+
+                    entered = list(line for line in entries if line.strip())
+                    if entered and callback:
+                        callback(progress.n, entered if batch else next(iter(entered)))
+
+                    progress.update(sum(len(line.encode("utf-8")) for line in entries))
+                    total += len(entered)
     return total
 
 
