@@ -428,7 +428,7 @@ def f_datum(vocab_fn, state_fn, max_steps, dimension, entry):
     }
 
 
-def f_scan(file, callback, batch):
+def f_scan(file, callback, filter, batch):
     total = 0
     if os.path.isfile(file):
         with open(file, "r") as f:
@@ -440,14 +440,28 @@ def f_scan(file, callback, batch):
                 dynamic_ncols=True,
             ) as progress:
                 n = batch or 1
-                for entries in iter(lambda: list(itertools.islice(f, n)), []):
-
-                    entered = list(line for line in entries if line.strip())
-                    if entered and callback:
-                        callback(progress.n, entered if batch else next(iter(entered)))
-
-                    progress.update(sum(len(line.encode("utf-8")) for line in entries))
-                    total += len(entered)
+                entries = []
+                for line in f:
+                    progress.update(len(line.encode("utf-8")))
+                    if line.strip():
+                        if filter is None or filter(line):
+                            entries.append(line)
+                            if len(entries) == n:
+                                if callback:
+                                    callback(
+                                        progress.n,
+                                        entries if batch else next(iter(entries)),
+                                    )
+                                total += len(entries)
+                                entries = []
+                if len(entries):
+                    if callback:
+                        callback(
+                            progress.n,
+                            entries if batch else next(iter(entries)),
+                        )
+                    total += len(entries)
+                    entries = []
     return total
 
 
@@ -485,7 +499,7 @@ def f_dataset(file, choice):
         )
         entries[key].append((offset, len(entry["action"])))
 
-    f_scan(file=file, callback=fn, batch=None)
+    f_scan(file=file, callback=fn, filter=None, batch=None)
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
@@ -528,33 +542,41 @@ def f_entry(data, info, file):
                 + "\n"
             )
 
-        f_scan(file=file, callback=fn_entry, batch=None)
+        f_scan(file=file, callback=fn_entry, filter=None, batch=None)
 
 
 def f_value(i, function, o, batch):
     with open(o, "w") as f:
 
-        def fn_value(offset, line):
-            entry = json.loads(line)
-            assert False, entry
-            f.write(
-                json.dumps(
-                    {
-                        "goal": entry["goal"],
-                        "start": entry["start"],
-                        "facing": entry["facing"],
-                        "action": entry["action"] + [],
-                        "text": entry["text"],
-                        "image": entry["image"],
-                        "index": entry["index"],
-                        "prefix": entry["prefix"],
-                    },
-                    sort_keys=True,
+        def fn_value(offset, entries):
+            entries = list(json.loads(entry) for entry in entries)
+            actions = function(entries)
+            for entry in zip(entries, actions):
+                f.write(
+                    json.dumps(
+                        {
+                            "goal": entry["goal"],
+                            "start": entry["start"],
+                            "facing": entry["facing"],
+                            "action": entry["action"] + [action],
+                            "text": entry["text"],
+                            "image": entry["image"],
+                            "index": entry["index"],
+                            "prefix": entry["prefix"],
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
 
-        f_scan(file=i, callback=fn_value, batch=batch)
+        def fn_filter(line):
+            entry = json.loads(line)
+            if entry["action"] and entry["action"][-1] == action_space[0].name:
+                print("!!!!ACTION!!!! - ", entry)
+                return False
+            return True
+
+        f_scan(file=i, callback=fn_value, filter=fn_filter, batch=batch)
 
 
 def f_chunk(total, info, encoder, image, file):
@@ -886,7 +908,7 @@ def run_spin(seed, data, image, max_steps, device):
         steps.add(len(entry["action"]))
         env_size.add(entry["env"])
 
-    f_scan(file=seed, callback=fn_check, batch=None)
+    f_scan(file=seed, callback=fn_check, filter=None, batch=None)
 
     assert max(steps) <= max_steps, f"{sorted(steps)}"
     assert len(env_size) == 1, f"{env_size}"
@@ -969,7 +991,7 @@ def run_spin(seed, data, image, max_steps, device):
                     + "\n"
                 )
 
-            f_scan(file=seed, callback=fn_chunk, batch=None)
+            f_scan(file=seed, callback=fn_chunk, filter=None, batch=None)
 
         f_entry(data=data, info=info, file=os.path.join(directory, f"data.chunk"))
 
@@ -1128,6 +1150,7 @@ def run_explore(data, image, total, batch, device):
             state: f_scan(
                 file=os.path.join(data, f"data.{choice}.data"),
                 callback=None,
+                filter=None,
                 batch=None,
             )
             for state in state_space
