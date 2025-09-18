@@ -485,7 +485,7 @@ def f_dataset(file, choice):
         )
         entries[key].append((offset, len(entry["action"])))
 
-    f_scan(file, fn)
+    f_scan(file=file, callback=fn, batch=None)
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
@@ -528,14 +528,15 @@ def f_entry(data, info, file):
                 + "\n"
             )
 
-        f_scan(file, fn_entry)
+        f_scan(file=file, callback=fn_entry, batch=None)
 
 
-def f_value(i, function, o):
+def f_value(i, function, o, batch):
     with open(o, "w") as f:
 
         def fn_value(offset, line):
             entry = json.loads(line)
+            assert False, entry
             f.write(
                 json.dumps(
                     {
@@ -552,9 +553,7 @@ def f_value(i, function, o):
                 + "\n"
             )
 
-        assert False
-
-        f_scan(i, fn_value)
+        f_scan(file=i, callback=fn_value, batch=batch)
 
 
 def f_chunk(total, info, encoder, image, file):
@@ -886,7 +885,7 @@ def run_spin(seed, data, image, max_steps, device):
         steps.add(len(entry["action"]))
         env_size.add(entry["env"])
 
-    f_scan(seed, fn_check)
+    f_scan(file=seed, callback=fn_check, batch=None)
 
     assert max(steps) <= max_steps, f"{sorted(steps)}"
     assert len(env_size) == 1, f"{env_size}"
@@ -969,9 +968,9 @@ def run_spin(seed, data, image, max_steps, device):
                     + "\n"
                 )
 
-            f_scan(seed, fn_chunk)
+            f_scan(file=seed, callback=fn_chunk, batch=None)
 
-        f_entry(data, info, os.path.join(directory, f"data.chunk"))
+        f_entry(data=data, info=info, file=os.path.join(directory, f"data.chunk"))
 
     torch.save(
         {
@@ -1069,7 +1068,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
             )
 
 
-def run_explore(data, image, total, device):
+def run_explore(data, image, total, batch, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
 
     load = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
@@ -1114,6 +1113,7 @@ def run_explore(data, image, total, device):
                 i=os.path.join(directory, f"data.chunk.{step}"),
                 function=f_explore,
                 o=os.path.join(directory, f"data.chunk.{step+1}"),
+                batch=batch,
             )
 
         for step in range(info["max"]):
@@ -1124,7 +1124,7 @@ def run_explore(data, image, total, device):
             )
 
         statistics = {
-            state: f_scan(file=os.path.join(data, f"data.{choice}.data"), callback=None)
+            state: f_scan(file=os.path.join(data, f"data.{choice}.data"), callback=None, batch=None)
             for state in state_space
         }
         print(
@@ -1316,6 +1316,7 @@ def main():
     explore_parser.add_argument("--data", required=True)
     explore_parser.add_argument("--image", required=True)
     explore_parser.add_argument("--total", type=int, required=True)
+    explore_parser.add_argument("--batch", type=int, required=True)
     explore_parser.add_argument("--device")
 
     # ---- finetune mode ----
@@ -1374,6 +1375,7 @@ def main():
             data=args.data,
             image=args.image,
             total=args.total,
+            batch=args.batch,
             device=args.device,
         )
 
