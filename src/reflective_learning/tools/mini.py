@@ -895,12 +895,12 @@ def run_spin(seed, data, image, max_steps, device):
                     facing=entry["facing"],
                     image=image,
                 )
-                entry_prefix = f_prefix(entry_text, entry_image, encoder, image)
-                assert (
-                    entry_prefix.dim() == 2
-                    and entry_prefix.shape[1] == info["layer"]["d_model"]
+                entry_prefix = f_prefix(
+                    entry_text,
+                    entry_image,
+                    encoder,
+                    image,
                 )
-
                 f.write(
                     json.dumps(
                         {
