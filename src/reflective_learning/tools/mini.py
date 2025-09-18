@@ -258,69 +258,16 @@ def f_sequence(
     return state, action
 
 
-def f_explore(
-    goal,
-    start,
-    facing,
-    image,
-    encoder,
-    info,
-    model,
-    device,
-):
-    env_size, max_steps, vocab = (
-        info["env"],
-        info["max"],
-        info["vocab"],
-    )
-
-    prefix = f_prefix(
-        entry_text=f_text(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-        ),
-        entry_image=f_image(
-            env_size=env_size,
-            max_steps=max_steps,
-            goal=goal,
-            start=start,
-            facing=facing,
-            image=image,
-        ),
-        encoder=encoder,
-        image=image,
-    )
-
+def f_explore(model, max_steps, device, entries):
     token = explore(
-        model=model,
-        prefix=prefix,
+        modeli=model,
+        batch=entries,
         maximum=max_steps,
         device=device,
     )
-    action = token.tolist()
-    action = action[: action.index(0) + 1] if 0 in action else action
-
     symbol = {v: k for k, v in vocab.items()}
-    action = [symbol[e] for e in action]
-
-    state = f_step(
-        step=f_replay(env_size, max_steps, goal, start, facing, action),
-        max_steps=max_steps,
-    )
-
-    return f_entry(
-        goal=goal,
-        start=start,
-        facing=facing,
-        image=image,
-        env_size=env_size,
-        max_steps=max_steps,
-        action=action,
-        state=state,
-    )
+    action = [symbol[e] for e in token.tolist()]
+    return action
 
 
 def f_callback(
