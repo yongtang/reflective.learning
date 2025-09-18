@@ -546,6 +546,7 @@ def f_value(i, function, o, batch):
                         "action": entry["action"] + [],
                         "text": entry["text"],
                         "image": entry["image"],
+                        "index": entry["index"],
                         "prefix": entry["prefix"],
                     },
                     sort_keys=True,
@@ -1124,7 +1125,11 @@ def run_explore(data, image, total, batch, device):
             )
 
         statistics = {
-            state: f_scan(file=os.path.join(data, f"data.{choice}.data"), callback=None, batch=None)
+            state: f_scan(
+                file=os.path.join(data, f"data.{choice}.data"),
+                callback=None,
+                batch=None,
+            )
             for state in state_space
         }
         print(
