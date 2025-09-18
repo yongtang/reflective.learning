@@ -1111,25 +1111,17 @@ def run_explore(data, image, total, device):
                 o=os.path.join(directory, f"data.chunk.{step+1}"),
             )
 
-        statistics = {state: 0 for state in state_space}
-        with contextlib.ExitStack() as stack:
-            f = {
-                choice: stack.enter_context(
-                    open(os.path.join(data, f"data.{choice}.data"), "w")
-                )
-                for choice in state_space
-            }
+        for step in range(info["max"]):
+            f_entry(
+                data=data,
+                info=info,
+                file=os.path.join(directory, f"data.chunk.{step+1}"),
+            )
 
-            def fn_entry(offset, line):
-                entry = json.loads(line)
-
-                f[entry["state"]].write(json.dumps(entry, sort_keys=True) + "\n")
-                statistics[entry["state"]] += 1
-
-            for step in range(info["max"]):
-
-                f_scan(os.path.join(directory, f"data.chunk.{step+1}"), fn_entry)
-
+        statistics = {
+            state: f_scan(file=os.path.join(data, f"data.{choice}.data"), callback=None)
+            for state in state_space
+        }
         print(
             "Statistics: "
             + "["
