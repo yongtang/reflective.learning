@@ -485,6 +485,47 @@ def f_dataset(file, choice):
     return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
+def f_entry(data, info, file):
+    with contextlib.ExitStack() as stack:
+        f = {
+            choice: stack.enter_context(
+                open(os.path.join(data, f"seed.{choice}.data"), "w")
+            )
+            for choice in state_space
+        }
+
+        def fn_entry(offset, line):
+            entry = json.loads(line)
+
+            state = f_step(
+                step=f_replay(
+                    env_size=info["env"],
+                    max_steps=info["max"],
+                    goal=entry["goal"],
+                    start=entry["start"],
+                    facing=entry["facing"],
+                    action=entry["action"],
+                ),
+                max_steps=info["max"],
+            )
+
+            f[state].write(
+                json.dumps(
+                    {
+                        "text": entry["text"],
+                        "image": entry["image"],
+                        "prefix": entry["prefix"],
+                        "action": entry["action"],
+                        "state": state,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+
+        f_scan(file, fn_entry)
+
+
 def f_value(step, function, directory):
     with open(os.path.join(directory, f"data.chunk.{step+1}"), "w") as f:
 
@@ -881,15 +922,15 @@ def run_spin(seed, data, image, max_steps, device):
             def fn_chunk(offset, line):
                 entry = json.loads(line)
                 entry_text = f_text(
-                    env_size=env_size,
-                    max_steps=max_steps,
+                    env_size=info["env"],
+                    max_steps=info["max"],
                     goal=entry["goal"],
                     start=entry["start"],
                     facing=entry["facing"],
                 )
                 entry_image = f_image(
-                    env_size=env_size,
-                    max_steps=max_steps,
+                    env_size=info["env"],
+                    max_steps=info["max"],
                     goal=entry["goal"],
                     start=entry["start"],
                     facing=entry["facing"],
@@ -922,44 +963,7 @@ def run_spin(seed, data, image, max_steps, device):
 
             f_scan(seed, fn_chunk)
 
-        with contextlib.ExitStack() as stack:
-            f = {
-                choice: stack.enter_context(
-                    open(os.path.join(data, f"seed.{choice}.data"), "w")
-                )
-                for choice in state_space
-            }
-
-            def fn_entry(offset, line):
-                entry = json.loads(line)
-
-                state = f_step(
-                    step=f_replay(
-                        env_size=env_size,
-                        max_steps=max_steps,
-                        goal=entry["goal"],
-                        start=entry["start"],
-                        facing=entry["facing"],
-                        action=entry["action"],
-                    ),
-                    max_steps=max_steps,
-                )
-
-                f[state].write(
-                    json.dumps(
-                        {
-                            "text": entry["text"],
-                            "image": entry["image"],
-                            "prefix": entry["prefix"],
-                            "action": entry["action"],
-                            "state": state,
-                        },
-                        sort_keys=True,
-                    )
-                    + "\n"
-                )
-
-            f_scan(os.path.join(directory, f"data.chunk"), fn_entry)
+        f_entry(data, info, os.path.join(directory, f"data.chunk"))
 
     torch.save(
         {
