@@ -910,6 +910,7 @@ def run_spin(seed, data, image, max_steps, device):
                             "action": entry["action"],
                             "text": entry_text,
                             "image": entry_image,
+                            "index": entry_prefix.shape[0],
                             "prefix": base64.b64encode(
                                 entry_prefix.numpy().tobytes()
                             ).decode("utf-8"),
@@ -1097,7 +1098,11 @@ def run_explore(data, image, total, device):
         )
 
         for step in range(info["max"]):
-            f_value(step=step, directory=directory, function=f_sequence)
+            f_value(
+                step=step,
+                directory=directory,
+                function=f_sequence,
+            )
 
         statistics = {state: 0 for state in state_space}
         with contextlib.ExitStack() as stack:
