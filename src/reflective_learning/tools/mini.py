@@ -18,7 +18,12 @@ import torch
 from tqdm import tqdm
 
 from reflective_learning.encoder import ContextEncoder
-from reflective_learning.inference import explore, sequence
+from reflective_learning.inference import (
+    explore,
+    explore_batched,
+    sequence,
+    sequence_batched,
+)
 from reflective_learning.launch import launch
 from reflective_learning.model import ReflectiveCore
 from reflective_learning.train import dpo, train
@@ -638,24 +643,33 @@ def fn_observe(entries, env_size, max_steps, index):
     }
 
 
-def fn_inference(entries, function, vocab, index):
-    entry = entries[index]
-
-    token = function(torch.tensor(entry["prefix"]))
-    action = token.tolist()
-    action = action[: action.index(0) + 1] if 0 in action else action
-
+def fn_inference(entries, batch, function, vocab, index):
     symbol = {v: k for k, v in vocab.items()}
-    action = [symbol[e] for e in action]
 
-    return {
-        "goal": entry["goal"],
-        "start": entry["start"],
-        "facing": entry["facing"],
-        "text": entry["text"],
-        "image": entry["image"],
-        "token": action,
-    }
+    def f(entry, token):
+        action = token.tolist()
+        action = action[: action.index(0) + 1] if 0 in action else action
+        action = [symbol[e] for e in action]
+
+        return {
+            "goal": entry["goal"],
+            "start": entry["start"],
+            "facing": entry["facing"],
+            "text": entry["text"],
+            "image": entry["image"],
+            "token": action,
+        }
+
+    if batch:
+        return tuple(
+            f(entry, token)
+            for entry, token in zip(
+                entries[index],
+                function(list(torch.tensor(e["prefix"]) for e in entries[index])),
+            )
+        )
+    else:
+        return f(entries[index], function(torch.tensor(entries[index]["prefix"])))
 
 
 def run_seed(env_size, max_steps, num_seeds, save_seed):
@@ -904,7 +918,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
             )
 
 
-def run_explore(data, image, total, device):
+def run_explore(data, image, total, batch, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
 
     load = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
@@ -970,18 +984,42 @@ def run_explore(data, image, total, device):
     f_prefix.cache_clear()
 
     def fn_explore(prefix):
-        return explore(
-            model=model,
-            prefix=prefix,
-            maximum=info["max"],
-            device=device,
+        if batch:
+            return explore_batched(
+                model=model,
+                prefix=prefix,
+                maximum=info["max"],
+                device=device,
+            )
+        else:
+            return explore(
+                model=model,
+                prefix=prefix,
+                maximum=info["max"],
+                device=device,
+            )
+
+    if batch:
+        entries = list(itertools.batched(entries, batch))
+        batched = len(entries)
+        entries = f_data(
+            desc=f"Data explore",
+            callback=functools.partial(
+                fn_inference, entries, batch, fn_explore, info["vocab"]
+            ),
+            total=batched,
+        )
+        assert len(entries) == batched
+        entries = list(itertools.chain.from_iterable(entries))
+    else:
+        entries = f_data(
+            desc=f"Data explore",
+            callback=functools.partial(
+                fn_inference, entries, batch, fn_explore, info["vocab"]
+            ),
+            total=total,
         )
 
-    entries = f_data(
-        desc=f"Data explore",
-        callback=functools.partial(fn_inference, entries, fn_explore, info["vocab"]),
-        total=total,
-    )
     assert len(entries) == total
 
     entries = f_data(
@@ -1125,7 +1163,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
             )
 
 
-def run_play(goal, start, facing, model, device):
+def run_play(goal, start, facing, model, total, batch, device):
     print(f"Load model: {model}")
 
     load = torch.load(model, map_location="cpu")
@@ -1135,8 +1173,6 @@ def run_play(goal, start, facing, model, device):
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
-
-    total = 1
 
     def fn_entry(index):
         return {"goal": goal, "start": start, "facing": facing}
@@ -1163,19 +1199,43 @@ def run_play(goal, start, facing, model, device):
         f_prefix.cache_clear()
 
     def fn_predict(prefix):
-        return sequence(
-            model=model,
-            reduce=lambda logit: logit[0] - logit[1],  # success - failure
-            prefix=prefix,
-            maximum=info["max"],
-            device=device,
-        )
+        if batch:
+            return sequence_batched(
+                model=model,
+                reduce=lambda logit: logit[0] - logit[1],  # success - failure
+                prefix=prefix,
+                maximum=info["max"],
+                device=device,
+            )
+        else:
+            return sequence(
+                model=model,
+                reduce=lambda logit: logit[0] - logit[1],  # success - failure
+                prefix=prefix,
+                maximum=info["max"],
+                device=device,
+            )
 
-    entries = f_data(
-        desc=f"Play predict",
-        callback=functools.partial(fn_inference, entries, fn_predict, info["vocab"]),
-        total=total,
-    )
+    if batch:
+        entries = list(itertools.batched(entries, batch))
+        batched = len(entries)
+        entries = f_data(
+            desc=f"Play predict",
+            callback=functools.partial(
+                fn_inference, entries, batch, fn_predict, info["vocab"]
+            ),
+            total=batched,
+        )
+        assert len(entries) == batched
+        entries = list(itertools.chain.from_iterable(entries))
+    else:
+        entries = f_data(
+            desc=f"Play predict",
+            callback=functools.partial(
+                fn_inference, entries, batch, fn_predict, info["vocab"]
+            ),
+            total=total,
+        )
     assert len(entries) == total
 
     entries = f_data(
@@ -1234,6 +1294,7 @@ def main():
     explore_parser.add_argument("--data", required=True)
     explore_parser.add_argument("--image", required=True)
     explore_parser.add_argument("--total", type=int, required=True)
+    explore_parser.add_argument("--batch", type=int, required=True)
     explore_parser.add_argument("--device")
 
     # ---- finetune mode ----
@@ -1252,6 +1313,8 @@ def main():
     play_parser.add_argument("--goal", type=f_pair, required=True)
     play_parser.add_argument("--start", type=f_pair, required=True)
     play_parser.add_argument("--facing", choices=facing_space, required=True)
+    play_parser.add_argument("--total", type=int, required=True)
+    play_parser.add_argument("--batch", type=int, required=True)
     play_parser.add_argument("--device")
 
     args = parser.parse_args()
@@ -1291,6 +1354,7 @@ def main():
             data=args.data,
             image=args.image,
             total=args.total,
+            batch=args.batch,
             device=args.device,
         )
 
@@ -1312,6 +1376,8 @@ def main():
             start=args.start,
             facing=args.facing,
             model=args.model,
+            total=args.total,
+            batch=args.batch,
             device=args.device,
         )
 

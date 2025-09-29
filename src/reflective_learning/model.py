@@ -147,6 +147,10 @@ class ReflectiveCore(nn.Module):
                 - "token": LongTensor [B, T] — full token sequence
                 - "state": LongTensor [B] — state per example
                 - "index": LongTensor [B] — index where token embeddings begin in logits
+
+        Note:
+            While mainly intended for training (T > 0), in the inference (batch) case
+            T can be zero, meaning the token sequence may be empty.
         """
         device = next(self.parameters()).device
         D = self.d_model
@@ -161,10 +165,14 @@ class ReflectiveCore(nn.Module):
             state = entry["state"].to(device, non_blocking=True)  # []
 
             T = token.size(0)
-            assert T > 0, "Token sequence must have at least 1 token"
+            # Allow T == 0 for inference (batch) case; keep training assumption otherwise.
+            if T == 0:
+                value = token.new_zeros((0, V)).float()  # [0, V]
+                value = self.input_linear(value)  # [0, D]
+            else:
+                value = F.one_hot(token, num_classes=V).float()  # [T, V]
+                value = self.input_linear(value)  # [T, D]
 
-            value = F.one_hot(token, num_classes=V).float()  # [T, V]
-            value = self.input_linear(value)  # [T, D]
             value = torch.cat([prefix, value], dim=0)  # [C + T, D]
 
             embed_list.append(value)
