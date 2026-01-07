@@ -26,9 +26,9 @@ from reflective_learning.inference import (
 )
 from reflective_learning.launch import launch
 from reflective_learning.model import ReflectiveCore
+from reflective_learning.tools import metadata
 from reflective_learning.train import dpo, train
 
-state_space = ["success", "failure"]
 action_space = [
     minigrid.core.actions.Actions.done,
     minigrid.core.actions.Actions.left,
@@ -157,34 +157,6 @@ def f_render(env_size, max_steps, goal, start, facing):
     return img
 
 
-def f_model(info, state):
-    vocab_indices = sorted(info["vocab"].values())
-    assert vocab_indices == list(range(len(vocab_indices))), f"{info['vocab']}"
-    vocab_size = len(vocab_indices)
-
-    max_seq_len = info["max"]
-    max_prefix_len = 512
-
-    decoder = torch.nn.TransformerEncoder(
-        torch.nn.TransformerEncoderLayer(
-            batch_first=True,
-            **info["layer"],
-        ),
-        **info["decoder"],
-    )
-
-    model = ReflectiveCore(
-        vocab_size=vocab_size,
-        max_seq_len=max_seq_len,
-        max_prefix_len=max_prefix_len,
-        decoder=decoder,
-    )
-
-    model.load_state_dict(state) if state else None
-
-    return model
-
-
 def f_text(env_size, max_steps, goal, start, facing):
     return (
         f"env {env_size}",
@@ -296,34 +268,6 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
         "token": token,
         "state": state,
         "prefix": prefix,
-    }
-
-
-def f_info(max, vocab, meta):
-    return {
-        "max": max_steps,
-        "vocab": vocab,
-        "layer": {
-            "d_model": 768,
-            "nhead": 12,
-            "dim_feedforward": 3072,
-            "dropout": 0.1,
-        },
-        "decoder": {
-            "num_layers": 12,
-        },
-        "context": {
-            "text": {
-                "model": "gpt2",
-                "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
-            },
-            "image": {
-                "model": "google/vit-base-patch16-224",
-                "revision": "3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3",
-            },
-            "transformers": "4.50.0",
-        },
-        "meta": meta,
     }
 
 
@@ -464,11 +408,8 @@ def f_learn(
     world_size,
     distributed,
 ):
-    print(f"Load model: {os.path.join(data, f'model.pt')} ({choice})")
-    info, model = operator.itemgetter("info", choice)(
-        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    )
-    model = f_model(info, model)
+    print(f'Load model: {os.path.join(data, f"model.pt")} ({choice})')
+    info, model = metadata.load(os.path.join(data, f"model.pt"), choice)
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     dataset = np.load(file, allow_pickle=True)
@@ -477,7 +418,7 @@ def f_learn(
         datum_fn=functools.partial(
             f_datum,
             vocab_fn=lambda e: info["vocab"][e],
-            state_fn=lambda e: state_space.index(e),
+            state_fn=lambda e: metadata.state_space.index(e),
             max_steps=info["max"],
             image=image,
             encoder=encoder,
@@ -545,12 +486,10 @@ def f_finetune(
     world_size,
     distributed,
 ):
-    print(f"Load model: {os.path.join(data, f'model.pt')}")
-    info, finetune = operator.itemgetter("info", choice)(
-        torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
+    print(f'Load model: {os.path.join(data, f"model.pt")}')
+    info, baseline, finetune = metadata.load(
+        os.path.join(data, f"model.pt"), [choice, choice]
     )
-    baseline = f_model(info, finetune)
-    finetune = f_model(info, finetune)
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
     dataset = np.load(file, allow_pickle=True)
@@ -559,7 +498,7 @@ def f_finetune(
         datum_fn=functools.partial(
             f_datum,
             vocab_fn=lambda e: info["vocab"][e],
-            state_fn=lambda e: state_space.index(e),
+            state_fn=lambda e: metadata.state_space.index(e),
             max_steps=info["max"],
             image=image,
             encoder=encoder,
@@ -707,7 +646,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
             while True:
                 steps = random.randint(1, max_steps)
                 goal, start, facing, action = f_observation(env_size, steps=steps)
-                if index % len(state_space) != 0:
+                if index % len(metadata.state_space) != 0:
                     goal = (
                         random.randint(1, env_size - 2),
                         random.randint(1, env_size - 2),
@@ -796,13 +735,13 @@ def run_spin(seed, data, image, max_steps):
     assert len(entries) == total
 
     os.makedirs(data, exist_ok=True)
-    statistics = {choice: 0 for choice in state_space}
+    statistics = {choice: 0 for choice in metadata.state_space}
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
                 open(os.path.join(data, f"seed.{choice}.data"), "w")
             )
-            for choice in state_space
+            for choice in metadata.state_space
         }
 
         def fn_statistics(index):
@@ -819,22 +758,19 @@ def run_spin(seed, data, image, max_steps):
         + "["
         + ", ".join(
             f"{choice}:{statistics[choice]} ({os.path.join(data, f'seed.{choice}.data')})"
-            for choice in state_space
+            for choice in metadata.state_space
         )
         + "]"
     )
 
-    info = f_info(max=max_steps, vocab=vocab, meta={"env": env_size})
-
-    torch.save(
-        {
-            "info": info,
-            **{choice: f_model(info, None).state_dict() for choice in state_space},
-        },
-        os.path.join(data, f"model.pt"),
+    metadata.save(
+        file=os.path.join(data, f"model.pt"),
+        max=max_steps,
+        vocab=vocab,
+        meta={"env": env_size},
     )
 
-    print(f"Save model: {os.path.join(data, f'model.pt')}")
+    print(f'Save model: {os.path.join(data, f"model.pt")}')
 
     return
 
@@ -925,15 +861,13 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
 def run_explore(data, image, total, batch, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
 
-    load = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")
-    info = load["info"]
-    model = list(f_model(info, load[choice]) for choice in state_space)
+    info, *model = metadata.load(os.path.join(data, f"model.pt"), *metadata.state_space)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    for choice in state_space:
+    for choice in metadata.state_space:
         if os.path.isfile(os.path.join(data, f"data.{choice}.data")):
             entries = sorted(
                 os.path.basename(e)
@@ -1035,13 +969,13 @@ def run_explore(data, image, total, batch, device):
     )
     assert len(entries) == total
 
-    statistics = {choice: 0 for choice in state_space}
+    statistics = {choice: 0 for choice in metadata.state_space}
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
                 open(os.path.join(data, f"data.{choice}.data"), "w")
             )
-            for choice in state_space
+            for choice in metadata.state_space
         }
 
         def fn_statistics(index):
@@ -1058,7 +992,7 @@ def run_explore(data, image, total, batch, device):
         + "["
         + ", ".join(
             f"{choice}:{statistics[choice]} ({os.path.join(data, f'data.{choice}.data')})"
-            for choice in state_space
+            for choice in metadata.state_space
         )
         + "]"
     )
@@ -1070,7 +1004,9 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
 
     choice = "success"
 
-    info = torch.load(os.path.join(data, f"model.pt"), map_location="cpu")["info"]
+    info = torch.load(
+        os.path.join(data, f"model.pt"), map_location="cpu", weights_only=False
+    )["info"]
 
     essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
     reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
@@ -1172,9 +1108,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
 def run_play(goal, start, facing, model, total, batch, device):
     print(f"Load model: {model}")
 
-    load = torch.load(model, map_location="cpu")
-    info = load["info"]
-    model = list(f_model(info, load[choice]) for choice in state_space)
+    info, *model = metadata.load(model, *metadata.state_space)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
