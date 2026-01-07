@@ -299,6 +299,34 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     }
 
 
+def f_info(max, vocab, meta):
+    return {
+        "max": max_steps,
+        "vocab": vocab,
+        "layer": {
+            "d_model": 768,
+            "nhead": 12,
+            "dim_feedforward": 3072,
+            "dropout": 0.1,
+        },
+        "decoder": {
+            "num_layers": 12,
+        },
+        "context": {
+            "text": {
+                "model": "gpt2",
+                "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+            },
+            "image": {
+                "model": "google/vit-base-patch16-224",
+                "revision": "3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3",
+            },
+            "transformers": "4.50.0",
+        },
+        "meta": meta,
+    }
+
+
 def f_scan(desc, callback, file):
     if os.path.isfile(file):
         with open(file, "r") as f:
@@ -591,14 +619,14 @@ def f_finetune(
 def fn_prefix(entries, info, image, f_prefix, index):
     entry = entries[index]
     entry_text = f_text(
-        env_size=info["env"],
+        env_size=info["meta"]["env"],
         max_steps=info["max"],
         goal=entry["goal"],
         start=entry["start"],
         facing=entry["facing"],
     )
     entry_image = f_image(
-        env_size=info["env"],
+        env_size=info["meta"]["env"],
         max_steps=info["max"],
         goal=entry["goal"],
         start=entry["start"],
@@ -796,31 +824,7 @@ def run_spin(seed, data, image, max_steps):
         + "]"
     )
 
-    info = {
-        "env": env_size,
-        "max": max_steps,
-        "vocab": vocab,
-        "layer": {
-            "d_model": 768,
-            "nhead": 12,
-            "dim_feedforward": 3072,
-            "dropout": 0.1,
-        },
-        "decoder": {
-            "num_layers": 12,
-        },
-        "context": {
-            "text": {
-                "model": "gpt2",
-                "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
-            },
-            "image": {
-                "model": "google/vit-base-patch16-224",
-                "revision": "3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3",
-            },
-            "transformers": "4.50.0",
-        },
-    }
+    info = f_info(max=max_steps, vocab=vocab, meta={"env": env_size})
 
     torch.save(
         {
@@ -953,12 +957,12 @@ def run_explore(data, image, total, batch, device):
 
         while True:
             goal = (
-                random.randint(1, info["env"] - 2),
-                random.randint(1, info["env"] - 2),
+                random.randint(1, info["meta"]["env"] - 2),
+                random.randint(1, info["meta"]["env"] - 2),
             )
             start = (
-                random.randint(1, info["env"] - 2),
-                random.randint(1, info["env"] - 2),
+                random.randint(1, info["meta"]["env"] - 2),
+                random.randint(1, info["meta"]["env"] - 2),
             )
             if goal != start:
                 break
@@ -1024,7 +1028,9 @@ def run_explore(data, image, total, batch, device):
 
     entries = f_data(
         desc=f"Data observe",
-        callback=functools.partial(fn_observe, entries, info["env"], info["max"]),
+        callback=functools.partial(
+            fn_observe, entries, info["meta"]["env"], info["max"]
+        ),
         total=total,
     )
     assert len(entries) == total
@@ -1240,7 +1246,9 @@ def run_play(goal, start, facing, model, total, batch, device):
 
     entries = f_data(
         desc=f"Play observe",
-        callback=functools.partial(fn_observe, entries, info["env"], info["max"]),
+        callback=functools.partial(
+            fn_observe, entries, info["meta"]["env"], info["max"]
+        ),
         total=total,
     )
     assert len(entries) == total
