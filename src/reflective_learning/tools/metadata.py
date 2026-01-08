@@ -177,6 +177,30 @@ def callback(
     return
 
 
+def datum(image, vocab_fn, state_fn, max_steps, encoder, entry):
+    assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
+
+    token = torch.tensor(
+        [vocab_fn(e) for e in entry["token"]],
+        dtype=torch.long,
+    )
+    state = torch.tensor(
+        state_fn(entry["state"]),
+        dtype=torch.long,
+    )
+
+    prefix = encoder.encode(
+        text=tuple(entry["text"]),
+        image=tuple(os.path.join(image, e) for e in entry["image"]),
+    )
+
+    return {
+        "token": token,
+        "state": state,
+        "prefix": prefix,
+    }
+
+
 def learn(
     model_file,
     dataset_file,

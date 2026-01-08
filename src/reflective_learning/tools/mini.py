@@ -172,30 +172,6 @@ def f_image(env_size, max_steps, goal, start, facing, image):
     return tuple([filename])
 
 
-def f_datum(image, vocab_fn, state_fn, max_steps, encoder, entry):
-    assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
-
-    token = torch.tensor(
-        [vocab_fn(e) for e in entry["token"]],
-        dtype=torch.long,
-    )
-    state = torch.tensor(
-        state_fn(entry["state"]),
-        dtype=torch.long,
-    )
-
-    prefix = encoder.encode(
-        text=tuple(entry["text"]),
-        image=tuple(os.path.join(image, e) for e in entry["image"]),
-    )
-
-    return {
-        "token": token,
-        "state": state,
-        "prefix": prefix,
-    }
-
-
 def f_data(desc, callback, total):
     total_width = len(str(total))
     bar_format = (
@@ -474,7 +450,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
                 callback=metadata.learn,
                 model_file=model_file,
                 dataset_file=dataset_file,
-                datum_fn=functools.partial(f_datum, image),
+                datum_fn=functools.partial(metadata.datum, image),
                 file=file,
                 choice=choice,
                 total=total,
@@ -490,7 +466,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
             metadata.learn(
                 model_file=model_file,
                 dataset_file=dataset_file,
-                datum_fn=functools.partial(f_datum, image),
+                datum_fn=functools.partial(metadata.datum, image),
                 choice=choice,
                 total=total,
                 batch=batch,
@@ -700,7 +676,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
                 callback=metadata.finetune,
                 model_file=model_file,
                 dataset_file=dataset_file,
-                datum_fn=functools.partial(f_datum, image),
+                datum_fn=functools.partial(metadata.datum, image),
                 choice=choice,
                 data=data,
                 total=total,
@@ -716,7 +692,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
             metadata.finetune(
                 model_file=model_file,
                 dataset_file=dataset_file,
-                datum_fn=functools.partial(f_datum, image),
+                datum_fn=functools.partial(metadata.datum, image),
                 choice=choice,
                 data=data,
                 total=total,
