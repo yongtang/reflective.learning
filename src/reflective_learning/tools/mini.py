@@ -244,7 +244,7 @@ def f_callback(
     return
 
 
-def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
+def f_datum(image, vocab_fn, state_fn, max_steps, encoder, entry):
     assert len(entry["token"]) <= max_steps, f"{max_steps} vs. {entry['token']}"
 
     token = torch.tensor(
@@ -343,8 +343,9 @@ class FinetuneDataset(torch.utils.data.Dataset):
         self.file[file_b].seek(offset_b)
         line_b = self.file[file_b].readline()
 
-        return self.datum_fn(entry=json.loads(line_a)), self.datum_fn(
-            entry=json.loads(line_b)
+        return (
+            self.datum_fn(entry=json.loads(line_a)),
+            self.datum_fn(entry=json.loads(line_b)),
         )
 
     def __len__(self):
@@ -354,8 +355,8 @@ class FinetuneDataset(torch.utils.data.Dataset):
 def f_learn(
     model_file,
     dataset_file,
+    datum_fn,
     choice,
-    image,
     total,
     batch,
     interval,
@@ -373,11 +374,10 @@ def f_learn(
     with LearnDataset(
         dataset=dataset,
         datum_fn=functools.partial(
-            f_datum,
+            datum_fn,
             vocab_fn=lambda e: info["vocab"][e],
             state_fn=lambda e: metadata.state_space.index(e),
             max_steps=info["max"],
-            image=image,
             encoder=encoder,
         ),
     ) as dataset:
@@ -431,8 +431,8 @@ def f_learn(
 def f_finetune(
     model_file,
     dataset_file,
+    datum_fn,
     choice,
-    image,
     total,
     batch,
     interval,
@@ -450,11 +450,10 @@ def f_finetune(
     with FinetuneDataset(
         dataset=dataset,
         datum_fn=functools.partial(
-            f_datum,
+            datum_fn,
             vocab_fn=lambda e: info["vocab"][e],
             state_fn=lambda e: metadata.state_space.index(e),
             max_steps=info["max"],
-            image=image,
             encoder=encoder,
         ),
     ) as dataset:
@@ -762,9 +761,9 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
                 callback=f_learn,
                 model_file=model_file,
                 dataset_file=dataset_file,
+                datum_fn=functools.partial(f_datum, image),
                 file=file,
                 choice=choice,
-                image=image,
                 total=total,
                 batch=batch,
                 interval=interval,
@@ -778,8 +777,8 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
             f_learn(
                 model_file=model_file,
                 dataset_file=dataset_file,
+                datum_fn=functools.partial(f_datum, image),
                 choice=choice,
-                image=image,
                 total=total,
                 batch=batch,
                 interval=interval,
@@ -988,9 +987,9 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
                 callback=f_finetune,
                 model_file=model_file,
                 dataset_file=dataset_file,
+                datum_fn=functools.partial(f_datum, image),
                 choice=choice,
                 data=data,
-                image=image,
                 total=total,
                 batch=batch,
                 interval=interval,
@@ -1004,9 +1003,9 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
             f_finetune(
                 model_file=model_file,
                 dataset_file=dataset_file,
+                datum_fn=functools.partial(f_datum, image),
                 choice=choice,
                 data=data,
-                image=image,
                 total=total,
                 batch=batch,
                 interval=interval,
