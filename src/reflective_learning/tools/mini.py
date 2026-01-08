@@ -451,7 +451,6 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
                 model_file=model_file,
                 dataset_file=dataset_file,
                 datum_fn=functools.partial(metadata.datum, image),
-                file=file,
                 choice=choice,
                 total=total,
                 batch=batch,

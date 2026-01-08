@@ -5,7 +5,18 @@ import torch
 import torch.distributed.launcher
 
 
-def f_entrypoint(callback, file, choice, data, image, total, batch, interval, lr, kind):
+def f_entrypoint(
+    callback,
+    model_file,
+    dataset_file,
+    datum_fn,
+    choice,
+    total,
+    batch,
+    interval,
+    lr,
+    kind,
+):
     # single-node defaults
     os.environ.setdefault("GLOO_SOCKET_IFNAME", "lo")
     os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -40,10 +51,9 @@ def f_entrypoint(callback, file, choice, data, image, total, batch, interval, lr
     print(f"[rank={rank}] process group ok", flush=True)
 
     callback(
-        file=file,
+        model_file=model_file,
+        dataset_file=dataset_file,
         choice=choice,
-        data=data,
-        image=image,
         total=total,
         batch=batch,
         interval=interval,
@@ -58,7 +68,18 @@ def f_entrypoint(callback, file, choice, data, image, total, batch, interval, lr
     torch.distributed.destroy_process_group()
 
 
-def launch(callback, file, choice, data, image, total, batch, interval, lr, device):
+def launch(
+    callback,
+    model_file,
+    dataset_file,
+    datum_fn,
+    choice,
+    total,
+    batch,
+    interval,
+    lr,
+    device,
+):
     device = list(torch.device(e) for e in set(device))
     kind = {e.type for e in device}
     assert len(kind) == 1
@@ -97,5 +118,14 @@ def launch(callback, file, choice, data, image, total, batch, interval, lr, devi
         monitor_interval=1,
     )
     torch.distributed.launcher.api.elastic_launch(config, entrypoint=f_entrypoint)(
-        callback, file, choice, data, image, total, batch, interval, lr, kind
+        callback,
+        model_file,
+        dataset_file,
+        datum_fn,
+        choice,
+        total,
+        batch,
+        interval,
+        lr,
+        kind,
     )
