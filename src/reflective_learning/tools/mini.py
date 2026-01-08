@@ -1,11 +1,9 @@
 import argparse
-import collections
 import contextlib
 import functools
 import glob
 import itertools
 import json
-import operator
 import os
 import random
 import shutil
@@ -25,7 +23,6 @@ from reflective_learning.inference import (
     sequence_batched,
 )
 from reflective_learning.launch import launch
-from reflective_learning.model import ReflectiveCore
 from reflective_learning.tools import metadata
 from reflective_learning.train import dpo, train
 
@@ -271,26 +268,6 @@ def f_datum(vocab_fn, state_fn, max_steps, image, encoder, entry):
     }
 
 
-def f_scan(desc, callback, file):
-    if os.path.isfile(file):
-        with open(file, "r") as f:
-            with tqdm(
-                total=os.path.getsize(file),
-                desc=desc,
-                unit="B",
-                unit_scale=True,
-                dynamic_ncols=True,
-            ) as progress:
-
-                def fn(line):
-                    data = callback(progress.n, line) if line.strip() else None
-                    progress.update(len(line.encode("utf-8")))
-                    return data
-
-                return list(filter(lambda e: e is not None, map(fn, f)))
-    return list()
-
-
 def f_data(desc, callback, total):
     total_width = len(str(total))
     bar_format = (
@@ -313,24 +290,6 @@ def f_data(desc, callback, total):
             return data
 
         return list(filter(lambda e: e is not None, map(fn, range(total))))
-
-
-def f_dataset(file, choice):
-    entries = collections.defaultdict(list)
-
-    def fn(offset, line):
-        entry = json.loads(line)
-        key = json.dumps(
-            {
-                "text": entry["text"],
-                "image": entry["image"],
-            },
-            sort_keys=True,
-        )
-        entries[key].append((offset, len(entry["token"])))
-
-    f_scan(f"Scan {choice}", fn, file)
-    return {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
 
 class LearnDataset(torch.utils.data.Dataset):
@@ -684,7 +643,7 @@ def run_spin(seed, data, image, max_steps):
         env_size.add(entry["env"])
         return entry
 
-    entries = f_scan(desc=f"Scan seed", callback=fn_check, file=seed)
+    entries = metadata.scan(desc=f"Scan seed", callback=fn_check, file=seed)
 
     assert max(steps) <= max_steps, f"{sorted(steps)}"
     assert len(env_size) == 1, f"{env_size}"
@@ -776,32 +735,13 @@ def run_spin(seed, data, image, max_steps):
 
 
 def run_learn(choice, data, image, total, batch, interval, lr, device, distributed):
-    essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
-    reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
+    essential = metadata.dataset(
+        os.path.join(data, f"seed.{choice}.data"), f"seed.{choice}.data"
+    )
+    reservoir = metadata.dataset(
+        os.path.join(data, f"data.{choice}.data"), f"data.{choice}.data"
+    )
 
-    essential_file = f"seed.{choice}.data"
-    reservoir_file = f"data.{choice}.data"
-
-    essential = {
-        k: np.concatenate(
-            [
-                np.array(v),
-                np.full((len(v), 1), essential_file, dtype=object),
-            ],
-            axis=1,
-        )
-        for k, v in essential.items()
-    }
-    reservoir = {
-        k: np.concatenate(
-            [
-                np.array(v),
-                np.full((len(v), 1), reservoir_file, dtype=object),
-            ],
-            axis=1,
-        )
-        for k, v in reservoir.items()
-    }
     assert len(essential) or len(reservoir)
 
     essential = essential if len(essential) else reservoir
@@ -1008,32 +948,12 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
         os.path.join(data, f"model.pt"), map_location="cpu", weights_only=False
     )["info"]
 
-    essential = f_dataset(os.path.join(data, f"seed.{choice}.data"), choice)
-    reservoir = f_dataset(os.path.join(data, f"data.{choice}.data"), choice)
-
-    essential_file = f"seed.{choice}.data"
-    reservoir_file = f"data.{choice}.data"
-
-    essential = {
-        k: np.concatenate(
-            [
-                np.array(v),
-                np.full((len(v), 1), essential_file, dtype=object),
-            ],
-            axis=1,
-        )
-        for k, v in essential.items()
-    }
-    reservoir = {
-        k: np.concatenate(
-            [
-                np.array(v),
-                np.full((len(v), 1), reservoir_file, dtype=object),
-            ],
-            axis=1,
-        )
-        for k, v in reservoir.items()
-    }
+    essential = metadata.dataset(
+        os.path.join(data, f"seed.{choice}.data"), f"seed.{choice}.data"
+    )
+    reservoir = metadata.dataset(
+        os.path.join(data, f"data.{choice}.data"), f"data.{choice}.data"
+    )
 
     def f_pair(v):
         p = []

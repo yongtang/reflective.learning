@@ -1,4 +1,10 @@
+import collections
+import json
+import os
+
+import numpy as np
 import torch
+from tqdm import tqdm
 
 from reflective_learning.model import ReflectiveCore
 
@@ -32,6 +38,58 @@ def f_model(info, state):
 
 
 state_space = ["success", "failure"]
+
+
+def scan(desc, callback, file):
+    if os.path.isfile(file):
+        with open(file, "r") as f:
+            with tqdm(
+                total=os.path.getsize(file),
+                desc=desc,
+                unit="B",
+                unit_scale=True,
+                dynamic_ncols=True,
+            ) as progress:
+
+                def fn(line):
+                    data = callback(progress.n, line) if line.strip() else None
+                    progress.update(len(line.encode("utf-8")))
+                    return data
+
+                return list(filter(lambda e: e is not None, map(fn, f)))
+    return list()
+
+
+def dataset(file, desc):
+    entries = collections.defaultdict(list)
+
+    def fn(offset, line):
+        entry = json.loads(line)
+        key = json.dumps(
+            {
+                "text": entry["text"],
+                "image": entry["image"],
+            },
+            sort_keys=True,
+        )
+        entries[key].append((offset, len(entry["token"])))
+
+    scan(f"Scan {desc}", fn, file)
+
+    entries = {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
+
+    entries = {
+        k: np.concatenate(
+            [
+                np.array(v),
+                np.full((len(v), 1), desc, dtype=object),
+            ],
+            axis=1,
+        )
+        for k, v in entries.items()
+    }
+
+    return entries
 
 
 def load(file, *selection):
