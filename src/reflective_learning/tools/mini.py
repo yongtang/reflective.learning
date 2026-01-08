@@ -174,7 +174,7 @@ def f_image(env_size, max_steps, goal, start, facing, image):
 
 
 def f_callback(
-    data,
+    model_file,
     choice,
     interval,
     distributed,
@@ -212,29 +212,29 @@ def f_callback(
     # keep copy of max_version = 3
     max_version = 3
     for i in reversed(range(1, max_version)):
-        src = os.path.join(data, f"model.{i:03d}.pt")
-        dst = os.path.join(data, f"model.{i+1:03d}.pt")
+        src = f"{model_file}.{i:03d}"
+        dst = f"{model_file}.{i+1:03d}"
         if os.path.exists(src):
             shutil.move(src, dst)
 
     # model.pt => model_1.pt
     shutil.move(
-        os.path.join(data, f"model.pt"),
-        os.path.join(data, f"model.{1:03d}.pt"),
+        f"{model_file}",
+        f"{model_file}.{1:03d}",
     )
 
-    save = torch.load(os.path.join(data, f"model.{1:03d}.pt"), map_location="cpu")
+    save = torch.load(f"{model_file}.{1:03d}", map_location="cpu")
     save[choice] = model.state_dict()
 
     # save model
     with tempfile.NamedTemporaryFile(
-        dir=data, prefix="model.", suffix=".pt", delete=False
+        dir=os.path.dirname(model_file), prefix="model.", suffix=".pt", delete=False
     ) as f:
         torch.save(save, f)
         f.flush()
         os.fsync(f.fileno())
         fname = f.name
-    os.replace(fname, os.path.join(data, "model.pt"))
+    os.replace(fname, f"{model_file}")
 
     progress._meta_index_ += interval
 
@@ -293,16 +293,15 @@ def f_data(desc, callback, total):
 
 
 class LearnDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, datum_fn, data):
+    def __init__(self, dataset, datum_fn):
         super().__init__()
         self.dataset = dataset
         self.datum_fn = datum_fn
-        self.data = data
 
     def __enter__(self):
         self.stack = contextlib.ExitStack()
         self.file = {
-            file: self.stack.enter_context(open(os.path.join(self.data, file), "r"))
+            file: self.stack.enter_context(open(file, "r"))
             for file in np.unique(self.dataset[:, 2])
         }
         return self
@@ -321,16 +320,15 @@ class LearnDataset(torch.utils.data.Dataset):
 
 
 class FinetuneDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, datum_fn, data):
+    def __init__(self, dataset, datum_fn):
         super().__init__()
         self.dataset = dataset
         self.datum_fn = datum_fn
-        self.data = data
 
     def __enter__(self):
         self.stack = contextlib.ExitStack()
         self.file = {
-            file: self.stack.enter_context(open(os.path.join(self.data, file), "r"))
+            file: self.stack.enter_context(open(self.data, "r"))
             for file in np.unique(self.dataset[:, :, 2])
         }
         return self
@@ -354,9 +352,9 @@ class FinetuneDataset(torch.utils.data.Dataset):
 
 
 def f_learn(
-    file,
+    model_file,
+    dataset_file,
     choice,
-    data,
     image,
     total,
     batch,
@@ -367,11 +365,11 @@ def f_learn(
     world_size,
     distributed,
 ):
-    print(f'Load model: {os.path.join(data, f"model.pt")} ({choice})')
-    info, model = metadata.load(os.path.join(data, f"model.pt"), choice)
+    print(f"Load model: {model_file} ({choice})")
+    info, model = metadata.load(model_file, choice)
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    dataset = np.load(file, allow_pickle=True)
+    dataset = np.load(dataset_file, allow_pickle=True)
     with LearnDataset(
         dataset=dataset,
         datum_fn=functools.partial(
@@ -382,7 +380,6 @@ def f_learn(
             image=image,
             encoder=encoder,
         ),
-        data=data,
     ) as dataset:
         collate_fn = model.collate
 
@@ -420,7 +417,7 @@ def f_learn(
             total=total,
             callback=functools.partial(
                 f_callback,
-                data=data,
+                model_file=model_file,
                 choice=choice,
                 interval=interval,
                 distributed=distributed,
@@ -432,9 +429,9 @@ def f_learn(
 
 
 def f_finetune(
-    file,
+    model_file,
+    dataset_file,
     choice,
-    data,
     image,
     total,
     batch,
@@ -445,13 +442,11 @@ def f_finetune(
     world_size,
     distributed,
 ):
-    print(f'Load model: {os.path.join(data, f"model.pt")}')
-    info, baseline, finetune = metadata.load(
-        os.path.join(data, f"model.pt"), [choice, choice]
-    )
+    print(f"Load model: {model_file}")
+    info, baseline, finetune = metadata.load(model_file, [choice, choice])
     encoder = ContextEncoder.from_pretrained(info["context"], device=device)
 
-    dataset = np.load(file, allow_pickle=True)
+    dataset = np.load(dataset_file, allow_pickle=True)
     with FinetuneDataset(
         dataset=dataset,
         datum_fn=functools.partial(
@@ -462,7 +457,6 @@ def f_finetune(
             image=image,
             encoder=encoder,
         ),
-        data=data,
     ) as dataset:
         collate_fn = finetune.collate
 
@@ -504,7 +498,7 @@ def f_finetune(
             total=total,
             callback=functools.partial(
                 f_callback,
-                data=data,
+                model_file=model_file,
                 choice=choice,
                 interval=interval,
                 distributed=distributed,
@@ -735,12 +729,8 @@ def run_spin(seed, data, image, max_steps):
 
 
 def run_learn(choice, data, image, total, batch, interval, lr, device, distributed):
-    essential = metadata.dataset(
-        os.path.join(data, f"seed.{choice}.data"), f"seed.{choice}.data"
-    )
-    reservoir = metadata.dataset(
-        os.path.join(data, f"data.{choice}.data"), f"data.{choice}.data"
-    )
+    essential = metadata.dataset(os.path.join(data, f"seed.{choice}.data"))
+    reservoir = metadata.dataset(os.path.join(data, f"data.{choice}.data"))
 
     assert len(essential) or len(reservoir)
 
@@ -760,17 +750,20 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
     random.shuffle(dataset)
 
     with tempfile.TemporaryDirectory() as directory:
-        file = os.path.join(directory, "dataset.npy")
-        np.save(file, dataset)
+        model_file = os.path.join(data, f"model.pt")
+
+        dataset_file = os.path.join(directory, "dataset.npy")
+        np.save(dataset_file, dataset)
 
         device = device or (["cuda"] if torch.cuda.is_available() else ["cpu"])
 
         if distributed:
             launch(
                 callback=f_learn,
+                model_file=model_file,
+                dataset_file=dataset_file,
                 file=file,
                 choice=choice,
-                data=data,
                 image=image,
                 total=total,
                 batch=batch,
@@ -783,9 +776,9 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
             device = next(iter(device))
 
             f_learn(
-                file=file,
+                model_file=model_file,
+                dataset_file=dataset_file,
                 choice=choice,
-                data=data,
                 image=image,
                 total=total,
                 batch=batch,
@@ -948,12 +941,8 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
         os.path.join(data, f"model.pt"), map_location="cpu", weights_only=False
     )["info"]
 
-    essential = metadata.dataset(
-        os.path.join(data, f"seed.{choice}.data"), f"seed.{choice}.data"
-    )
-    reservoir = metadata.dataset(
-        os.path.join(data, f"data.{choice}.data"), f"data.{choice}.data"
-    )
+    essential = metadata.dataset(os.path.join(data, f"seed.{choice}.data"))
+    reservoir = metadata.dataset(os.path.join(data, f"data.{choice}.data"))
 
     def f_pair(v):
         p = []
@@ -987,15 +976,18 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
     random.shuffle(dataset)
 
     with tempfile.TemporaryDirectory() as directory:
-        file = os.path.join(directory, "dataset.npy")
-        np.save(file, dataset)
+        model_file = os.path.join(data, f"model.pt")
+
+        dataset_file = os.path.join(directory, "dataset.npy")
+        np.save(dataset_file, dataset)
 
         device = device or (["cuda"] if torch.cuda.is_available() else ["cpu"])
 
         if distributed:
             launch(
                 callback=f_finetune,
-                file=file,
+                model_file=model_file,
+                dataset_file=dataset_file,
                 choice=choice,
                 data=data,
                 image=image,
@@ -1010,7 +1002,8 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
             device = next(iter(device))
 
             f_finetune(
-                file=file,
+                model_file=model_file,
+                dataset_file=dataset_file,
                 choice=choice,
                 data=data,
                 image=image,

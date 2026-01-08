@@ -60,7 +60,7 @@ def scan(desc, callback, file):
     return list()
 
 
-def dataset(file, desc):
+def dataset(file):
     entries = collections.defaultdict(list)
 
     def fn(offset, line):
@@ -74,7 +74,7 @@ def dataset(file, desc):
         )
         entries[key].append((offset, len(entry["token"])))
 
-    scan(f"Scan {desc}", fn, file)
+    scan(f"Scan {file}", fn, file)
 
     entries = {k: np.array(v).reshape((-1, 2)) for k, v in entries.items()}
 
@@ -82,7 +82,7 @@ def dataset(file, desc):
         k: np.concatenate(
             [
                 np.array(v),
-                np.full((len(v), 1), desc, dtype=object),
+                np.full((len(v), 1), file, dtype=object),
             ],
             axis=1,
         )
