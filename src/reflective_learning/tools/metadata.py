@@ -190,8 +190,9 @@ def datum(image, vocab_fn, state_fn, max_steps, encoder, entry):
     )
 
     prefix = encoder.encode(
-        text=tuple(entry["text"]),
-        image=tuple(os.path.join(image, e) for e in entry["image"]),
+        text=tuple(entry.get("text", [])),
+        image=tuple(os.path.join(image, e) for e in entry.get("image", [])),
+        block=torch.tensor(entry.get("block", [])),
     )
 
     return {

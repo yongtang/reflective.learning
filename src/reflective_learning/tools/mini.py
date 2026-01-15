@@ -529,7 +529,9 @@ def run_explore(data, image, total, batch, device):
     @functools.lru_cache(maxsize=None)
     def f_prefix(entry_text, entry_image):
         return encoder.encode(
-            text=entry_text, image=tuple(os.path.join(image, e) for e in entry_image)
+            text=entry_text,
+            image=tuple(os.path.join(image, e) for e in entry_image),
+            block=torch.tensor([]),
         ).numpy()
 
     entries = f_data(
@@ -727,6 +729,7 @@ def run_play(goal, start, facing, model, total, batch, device):
             return encoder.encode(
                 text=entry_text,
                 image=tuple(os.path.join(image, e) for e in entry_image),
+                block=torch.tensor([]),
             ).numpy()
 
         entries = f_data(

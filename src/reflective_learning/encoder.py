@@ -54,7 +54,7 @@ class ContextEncoder:
     def encode_text_embed(self, text: str) -> torch.Tensor:
         inputs = self.text_tokenizer(text, return_tensors="pt", truncation=True)
         input_ids = inputs["input_ids"].to(self.device, non_blocking=True)
-        with torch.inference_mode(), autocast():  # your helper
+        with torch.inference_mode(), autocast():
             output = self.text_model(input_ids=input_ids)
             # CPU float32 output, consistent regardless of autocast
             return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
@@ -66,14 +66,27 @@ class ContextEncoder:
         pixel_values = self.image_processor(
             images=image, return_tensors="pt"
         ).pixel_values.to(self.device, non_blocking=True)
-        with torch.inference_mode(), autocast():  # your helper
+        with torch.inference_mode(), autocast():
             output = self.image_model(pixel_values=pixel_values)
             # CPU float32 output, consistent regardless of autocast
             return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
 
-    def encode(self, text: list[str], image: list[str]) -> torch.Tensor:
+    @functools.lru_cache(maxsize=1024)
+    def encode_block_embed(self, block: torch.Tensor) -> torch.Tensor:
+        with torch.inference_mode(), autocast():
+            output = torch.nn.functional.pad(
+                block.flatten(),
+                (0, (-block.numel()) % self.text_model.config.hidden_size),
+            ).view(-1, self.text_model.config.hidden_size)
+            # CPU float32 output, consistent regardless of autocast
+            return output.to("cpu", dtype=torch.float32)
+
+    def encode(
+        self, text: list[str], image: list[str], block: torch.Tensor
+    ) -> torch.Tensor:
         text = list(self.encode_text_embed(chunk) for chunk in text)
         image = list(self.encode_image_embed(chunk) for chunk in image)
+        block = self.encode_block_embed(block)
         segments = []
         break_embed = torch.zeros(
             (1, self.text_model.config.hidden_size), dtype=torch.float32
@@ -85,6 +98,10 @@ class ContextEncoder:
 
         for chunk in image:
             segments.append(chunk)
+        segments.append(break_embed.clone())
+
+        segments.append(block)
+
         segments.append(break_embed.clone())
 
         return torch.cat(segments, dim=0)
