@@ -60,9 +60,10 @@ class ContextEncoder:
             return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
 
     @functools.lru_cache(maxsize=1024)
-    def encode_image_embed(self, image_path: str) -> torch.Tensor:
-        with PIL.Image.open(image_path) as f:
-            image = PIL.ImageOps.exif_transpose(f).convert("RGB")
+    def encode_image_embed(self, image) -> torch.Tensor:
+        if isinstance(image, str):
+            with PIL.Image.open(image) as f:
+                image = PIL.ImageOps.exif_transpose(f).convert("RGB")
         pixel_values = self.image_processor(
             images=image, return_tensors="pt"
         ).pixel_values.to(self.device, non_blocking=True)
@@ -82,7 +83,10 @@ class ContextEncoder:
             return output.to("cpu", dtype=torch.float32)
 
     def encode(
-        self, text: list[str], image: list[str], block: torch.Tensor
+        self,
+        text: list[str],
+        image: list,
+        block: torch.Tensor,
     ) -> torch.Tensor:
         text = list(self.encode_text_embed(chunk) for chunk in text)
         image = list(self.encode_image_embed(chunk) for chunk in image)
