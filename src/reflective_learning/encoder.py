@@ -72,8 +72,8 @@ class ContextEncoder:
             # CPU float32 output, consistent regardless of autocast
             return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
 
-    @functools.lru_cache(maxsize=1024)
     def encode_block_embed(self, block: torch.Tensor) -> torch.Tensor:
+        block = torch.as_tensor(block)
         with torch.inference_mode(), autocast():
             output = torch.nn.functional.pad(
                 block.flatten(),
