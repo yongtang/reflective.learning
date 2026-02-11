@@ -108,10 +108,12 @@ class FinetuneDataset(torch.utils.data.Dataset):
 
 def callback(
     model_file,
+    callback_fn,
     choice,
     interval,
     distributed,
     model,
+    loss,
     progress,
     device,
     rank,
@@ -141,6 +143,10 @@ def callback(
         progress.n > progress._meta_index_ + interval or progress.n == progress.total
     ):
         return
+
+    # run callback_fn
+    if callback_fn:
+        callback_fn(model, loss, choice, progress, interval)
 
     # keep copy of max_version = 3
     max_version = 3
@@ -205,6 +211,7 @@ def datum(image, vocab_fn, state_fn, max_steps, encoder, entry):
 def learn(
     model_file,
     dataset_file,
+    callback_fn,
     datum_fn,
     choice,
     total,
@@ -268,6 +275,7 @@ def learn(
             callback=functools.partial(
                 callback,
                 model_file=model_file,
+                callback_fn=callback_fn,
                 choice=choice,
                 interval=interval,
                 distributed=distributed,
@@ -281,6 +289,7 @@ def learn(
 def finetune(
     model_file,
     dataset_file,
+    callback_fn,
     datum_fn,
     choice,
     total,
@@ -348,6 +357,7 @@ def finetune(
             callback=functools.partial(
                 callback,
                 model_file=model_file,
+                callback_fn=callback_fn,
                 choice=choice,
                 interval=interval,
                 distributed=distributed,

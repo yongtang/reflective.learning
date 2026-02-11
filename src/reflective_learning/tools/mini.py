@@ -450,6 +450,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
                 callback=metadata.learn,
                 model_file=model_file,
                 dataset_file=dataset_file,
+                callback_fn=None,
                 datum_fn=functools.partial(metadata.datum, image),
                 choice=choice,
                 total=total,
@@ -465,6 +466,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
             metadata.learn(
                 model_file=model_file,
                 dataset_file=dataset_file,
+                callback_fn=None,
                 datum_fn=functools.partial(metadata.datum, image),
                 choice=choice,
                 total=total,
@@ -677,6 +679,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
                 callback=metadata.finetune,
                 model_file=model_file,
                 dataset_file=dataset_file,
+                callback_fn=None,
                 datum_fn=functools.partial(metadata.datum, image),
                 choice=choice,
                 data=data,
@@ -693,6 +696,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
             metadata.finetune(
                 model_file=model_file,
                 dataset_file=dataset_file,
+                callback_fn=None,
                 datum_fn=functools.partial(metadata.datum, image),
                 choice=choice,
                 data=data,

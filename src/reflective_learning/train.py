@@ -200,7 +200,9 @@ def train(
 
             if callback:
                 # Let the callback decide how to handle DDP wrapping and rank in case.
-                callback(model=model, progress=progress, device=device, rank=rank)
+                callback(
+                    model=model, loss=loss, progress=progress, device=device, rank=rank
+                )
 
             if count >= total:
                 break
@@ -311,7 +313,13 @@ def dpo(
 
             if callback:
                 # Let the callback decide DDP unwrapping and rank handling
-                callback(model=finetune, progress=progress, device=device, rank=rank)
+                callback(
+                    model=finetune,
+                    loss=loss,
+                    progress=progress,
+                    device=device,
+                    rank=rank,
+                )
 
             if count >= total:
                 break
