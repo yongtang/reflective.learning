@@ -3,21 +3,27 @@ import functools
 import PIL.Image
 import PIL.ImageOps
 import torch
-from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoProcessor, AutoTokenizer
 
 from reflective_learning.model import autocast
 
 
 class ContextEncoder:
     def __init__(
-        self, text_model, image_model, text_tokenizer, image_processor, device="cpu"
+        self,
+        dimension,
+        text_model,
+        image_model,
+        text_tokenizer,
+        image_processor,
+        device="cpu",
     ):
         assert text_model is not None, "text_model is required"
         assert image_model is not None, "image_model is required"
         assert text_tokenizer is not None, "text_tokenizer is required"
         assert image_processor is not None, "image_processor is required"
-        assert text_model.config.hidden_size == image_model.config.hidden_size
 
+        self.dimension = dimension
         self.device = torch.device(device)
         self.text_model = text_model.to(self.device).eval()
         self.image_model = image_model.to(self.device).eval()
@@ -26,23 +32,27 @@ class ContextEncoder:
 
     @classmethod
     def from_pretrained(cls, info, device="cpu"):
-        text_cfg = info["text"]
-        image_cfg = info["image"]
-
         text_model = AutoModel.from_pretrained(
-            info["text"]["model"], revision=info["text"]["revision"]
+            info["context"]["text"]["model"],
+            revision=info["context"]["text"]["revision"],
         )
         text_tokenizer = AutoTokenizer.from_pretrained(
-            info["text"]["model"], revision=info["text"]["revision"]
+            info["context"]["text"]["model"],
+            revision=info["context"]["text"]["revision"],
         )
         image_model = AutoModel.from_pretrained(
-            info["image"]["model"], revision=info["image"]["revision"]
+            info["context"]["image"]["model"],
+            revision=info["context"]["image"]["revision"],
         )
-        image_processor = AutoImageProcessor.from_pretrained(
-            info["image"]["model"], revision=info["image"]["revision"], use_fast=True
+        image_processor = AutoProcessor.from_pretrained(
+            info["context"]["image"]["model"],
+            revision=info["context"]["image"]["revision"],
+            use_fast=True,
         )
+        dimension = info["layer"]["d_model"]
 
         return cls(
+            dimension=dimension,
             text_model=text_model,
             image_model=image_model,
             text_tokenizer=text_tokenizer,
@@ -55,30 +65,36 @@ class ContextEncoder:
         inputs = self.text_tokenizer(text, return_tensors="pt", truncation=True)
         input_ids = inputs["input_ids"].to(self.device, non_blocking=True)
         with torch.inference_mode(), autocast():
-            output = self.text_model(input_ids=input_ids)
+            value = self.text_model(input_ids=input_ids).last_hidden_state.squeeze(0)
+            output = torch.nn.functional.pad(
+                value, (0, (self.dimension - value.shape[-1]))
+            ).view(-1, self.dimension)
             # CPU float32 output, consistent regardless of autocast
-            return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
+            return output.to("cpu", dtype=torch.float32)
 
     @functools.lru_cache(maxsize=1024)
     def encode_image_embed(self, image) -> torch.Tensor:
         if isinstance(image, str):
             with PIL.Image.open(image) as f:
                 image = PIL.ImageOps.exif_transpose(f).convert("RGB")
-        pixel_values = self.image_processor(
-            images=image, return_tensors="pt"
-        ).pixel_values.to(self.device, non_blocking=True)
         with torch.inference_mode(), autocast():
-            output = self.image_model(pixel_values=pixel_values)
+            values = self.image_processor(images=[image], return_tensors="pt")
+            values = {
+                k: v.to(self.device) for k, v in values.items() if torch.is_tensor(v)
+            }
+            value = self.image_model.get_image_features(**values).last_hidden_state
+            output = torch.nn.functional.pad(
+                value, (0, (self.dimension - value.shape[-1]))
+            ).view(-1, self.dimension)
             # CPU float32 output, consistent regardless of autocast
-            return output.last_hidden_state.squeeze(0).to("cpu", dtype=torch.float32)
+            return output.to("cpu", dtype=torch.float32)
 
     def encode_block_embed(self, block: torch.Tensor) -> torch.Tensor:
-        block = torch.as_tensor(block)
         with torch.inference_mode(), autocast():
+            value = torch.as_tensor(block).flatten()
             output = torch.nn.functional.pad(
-                block.flatten(),
-                (0, (-block.numel()) % self.text_model.config.hidden_size),
-            ).view(-1, self.text_model.config.hidden_size)
+                value, (0, (-block.numel()) % self.dimension)
+            ).view(-1, self.dimension)
             # CPU float32 output, consistent regardless of autocast
             return output.to("cpu", dtype=torch.float32)
 
@@ -92,9 +108,7 @@ class ContextEncoder:
         image = list(self.encode_image_embed(chunk) for chunk in image)
         block = self.encode_block_embed(block)
         segments = []
-        break_embed = torch.zeros(
-            (1, self.text_model.config.hidden_size), dtype=torch.float32
-        )
+        break_embed = torch.zeros((1, self.dimension), dtype=torch.float32)
 
         for chunk in text:
             segments.append(chunk)

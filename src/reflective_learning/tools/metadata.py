@@ -225,7 +225,7 @@ def learn(
 ):
     print(f"Load model: {model_file} ({choice})")
     info, model = load(model_file, choice)
-    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+    encoder = ContextEncoder.from_pretrained(info, device=device)
 
     dataset = np.load(dataset_file, allow_pickle=True)
     with LearnDataset(
@@ -303,7 +303,7 @@ def finetune(
 ):
     print(f"Load model: {model_file}")
     info, baseline, finetune = load(model_file, [choice, choice])
-    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+    encoder = ContextEncoder.from_pretrained(info, device=device)
 
     dataset = np.load(dataset_file, allow_pickle=True)
     with FinetuneDataset(
@@ -430,9 +430,9 @@ def save(file, max, vocab, meta):
         "max": max,
         "vocab": vocab,
         "layer": {
-            "d_model": 768,
+            "d_model": 1152,
             "nhead": 12,
-            "dim_feedforward": 3072,
+            "dim_feedforward": 4608,
             "dropout": 0.1,
         },
         "decoder": {

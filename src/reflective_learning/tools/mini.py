@@ -487,7 +487,7 @@ def run_explore(data, image, total, batch, device):
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+    encoder = ContextEncoder.from_pretrained(info, device=device)
 
     for choice in metadata.state_space:
         if os.path.isfile(os.path.join(data, f"data.{choice}.data")):
@@ -718,7 +718,7 @@ def run_play(goal, start, facing, model, total, batch, device):
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
-    encoder = ContextEncoder.from_pretrained(info["context"], device=device)
+    encoder = ContextEncoder.from_pretrained(info, device=device)
 
     def fn_entry(index):
         return {"goal": goal, "start": start, "facing": facing}
