@@ -440,14 +440,14 @@ def save(file, max, vocab, meta):
         },
         "context": {
             "text": {
-                "model": "gpt2",
+                "model": "openai-community/gpt2",
                 "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
             },
             "image": {
-                "model": "google/vit-base-patch16-224",
-                "revision": "3f49326eb077187dfe1c2a2bb15fbd74e6ab91e3",
+                "model": "google/siglip2-so400m-patch16-naflex",
+                "revision": "cc24074f717b612951c2dead130904ab9b65a81e",
             },
-            "transformers": "4.50.0",
+            "transformers": "5.1.0",
         },
         "meta": meta,
     }
