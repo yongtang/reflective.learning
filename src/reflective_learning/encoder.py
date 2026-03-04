@@ -78,11 +78,15 @@ class ContextEncoder:
             with PIL.Image.open(image) as f:
                 image = PIL.ImageOps.exif_transpose(f).convert("RGB")
         with torch.inference_mode(), autocast():
-            values = self.image_processor(images=[image], return_tensors="pt")
-            values = {
-                k: v.to(self.device) for k, v in values.items() if torch.is_tensor(v)
+            inputs = self.image_processor(
+                images=[image], do_resize=False, return_tensors="pt"
+            )
+            inputs = {
+                k: v.to(self.device) for k, v in inputs.items() if torch.is_tensor(v)
             }
-            value = self.image_model.get_image_features(**values).last_hidden_state
+            inputs["pixel_attention_mask"].bool()
+            value = self.image_model.get_image_features(**inputs).last_hidden_state
+            value = value[inputs["pixel_attention_mask"].bool()]
             output = torch.nn.functional.pad(
                 value, (0, (self.dimension - value.shape[-1]))
             ).view(-1, self.dimension)
