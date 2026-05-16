@@ -480,7 +480,7 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
             )
 
 
-def run_explore(data, image, total, batch, device):
+def run_explore(target, data, image, total, batch, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
 
     info, *model = metadata.load(os.path.join(data, f"model.pt"), *metadata.state_space)
@@ -840,6 +840,9 @@ def main():
 
     # ---- explore mode ----
     explore_parser = subparsers.add_parser("explore", help="Explore mode")
+    explore_parser.add_argument(
+        "--target", type=lambda s: [float(x) for x in s.split(",")], required=True
+    )
     explore_parser.add_argument("--data", required=True)
     explore_parser.add_argument("--image", required=True)
     explore_parser.add_argument("--total", type=int, required=True)
@@ -900,6 +903,7 @@ def main():
 
     elif args.mode == "explore":
         run_explore(
+            target=args.target,
             data=args.data,
             image=args.image,
             total=args.total,

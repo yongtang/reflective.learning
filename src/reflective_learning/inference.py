@@ -294,16 +294,18 @@ def sequence_batched(
 
 
 @torch.inference_mode()
-def explore_step(model, prefix, token, length, S, device, generator):
+def explore_step(model, prefix, token, length, S, target, device, generator):
     data = token[:length]
 
     # Collect next-token logits from each model independently: shape [M, V].
     with autocast():
         logit = torch.stack([e.call(data, prefix) for e in model], dim=0)  # [M, V]
 
-    # Bayes-balanced mixing weights:
-    #   weight_k proportional to exp(-S_k)  =>  weight = softmax(-S)
-    weight = torch.softmax(-S, dim=0)  # [M]
+    # Target-biased Bayes-balanced mixing:
+    #   weight_k proportional to target_k * exp(-S_k)
+    # Important subtlety: this biases the posterior trajectory toward `target`;
+    # it does not guarantee exact token-level mixture proportions.
+    weight = torch.softmax(torch.log(target) - S, dim=0)  # [M]
 
     # Next-token distribution from Bayes-balanced mixed logits:
     # probs = softmax( sum_k weight_k * logit_k )
@@ -335,6 +337,7 @@ def explore(
     prefix: torch.Tensor,  # [C, D]
     maximum: int,
     device: torch.device,
+    target: torch.Tensor | None = None,  # [M]
     generator: torch.Generator | None = None,  # optional reproducibility
 ) -> torch.Tensor:
     """
@@ -348,10 +351,10 @@ def explore(
       - Maintain a per-model cumulative log-likelihood S_k over the tokens already emitted.
         S_k is the sum of log-probabilities that model k assigned to the actually sampled tokens.
       - Before predicting the next token, compute per-model weights as:
-            weight = softmax(-S)
+            weight = softmax( log(target) - S )
         This is proportional to the inverse of each model's current posterior belief given
-        the generated tokens so far (labels already ahead receive less weight; those
-        behind receive more).
+        the generated tokens so far, biased toward the desired target distribution
+        (labels already ahead receive less weight; those behind receive more).
       - Predict next token from a single softmax over the convex combination of per-model logits:
             probs = softmax( sum_k weight_k * logit_k )
       - Update S_k by adding the log-probability that each model k assigned to the sampled token.
@@ -362,6 +365,8 @@ def explore(
       - We only ever query each model individually for next-token logits; the balancing happens
         purely in how we combine those logits each step.
       - The returned sequence will include the STOP token (0) if it is generated before `maximum`.
+      - Important subtlety: this biases the posterior trajectory toward `target`;
+        it does not guarantee exact token-level mixture proportions.
 
     Args:
         model: Iterable container of trained sub-models (one per label), each exposing
@@ -369,6 +374,8 @@ def explore(
         prefix (Tensor): [C, D] fixed prefix embedding for this sequence.
         maximum (int): Maximum number of tokens to generate (upper bound).
         device (device): Device for computation.
+        target (Tensor | None): [M] target mixture distribution over models.
+                                Defaults to uniform if None.
 
     Returns:
         Tensor: [T] of generated token indices (T <= maximum), possibly including STOP (0).
@@ -389,9 +396,15 @@ def explore(
         # Initialized to zeros -> uniform prior up to a constant (which cancels in softmax).
         S = torch.zeros(len(model), device=device)
 
+        if target is None:
+            target = torch.ones(len(model), device=device)
+        else:
+            target = target.to(dtype=torch.float32, device=device)
+        target = target / target.sum()
+
         for length in range(maximum):
             prediction, S = explore_step(
-                model, prefix, token, length, S, device, generator
+                model, prefix, token, length, S, target, device, generator
             )
 
             token[length] = prediction.item()
@@ -409,6 +422,7 @@ def explore_batched(
     prefix: list[torch.Tensor],  # list length N, each [C_i, D]
     maximum: int,
     device: torch.device,
+    target: torch.Tensor | None = None,  # [M]
     generator: torch.Generator | None = None,
 ):
     """
@@ -422,9 +436,10 @@ def explore_batched(
       - Maintain, per sequence i and per model k, a cumulative log-likelihood S[i, k]
         over the tokens already emitted by that sequence: S[i, k] = sum_t log p_k(x_t).
       - Before predicting the next token for every sequence, compute per-model weights:
-            weight[i] = softmax( -S[i] )          # shape [M], one set per sequence
+            weight[i] = softmax( log(target) - S[i] )   # shape [M], one set per sequence
         This downweights models that have explained the sequence well so far, and
-        upweights models that have explained it less well (keeps label usage balanced).
+        upweights models that have explained it less well while biasing toward the
+        desired target distribution (keeps label usage balanced).
       - For each sequence, mix per-model next-token logits with those weights and
         sample from a *single* softmax:
             probs[i] = softmax( sum_k weight[i,k] * logit[i,k] )
@@ -470,12 +485,18 @@ def explore_batched(
         distribution with uniform for that step only, to avoid contaminating
         sampling or NaNs in `multinomial`.
 
+    Notes:
+      - Important subtlety: this biases each posterior trajectory toward `target`;
+        it does not guarantee exact token-level mixture proportions.
+
     Args:
         model:   Iterable container of trained sub-models (one per label), each exposing
                  call(token, prefix) -> logits[V] and forward(mask, embed) -> [B, T, V].
         prefix:  Python list of N FloatTensor prefixes; item i is [C_i, D] for sequence i.
         maximum: Maximum number of tokens to generate (upper bound for each sequence).
         device:  Computation device.
+        target (Tensor | None): [M] target mixture distribution over models.
+                                Defaults to uniform if None.
         generator: Optional torch.Generator for reproducible sampling.
 
     Returns:
@@ -493,6 +514,12 @@ def explore_batched(
     assert N > 0, "No prefix provided"
     M = len(model)
     assert M > 0, "No sub-model provided"
+
+    if target is None:
+        target = torch.ones(M, device=device)
+    else:
+        target = target.to(dtype=torch.float32, device=device)
+    target = target / target.sum()
 
     # Per-sequence buffers:
     #   token[i, t] holds the t-th sampled token id for sequence i.
@@ -570,7 +597,13 @@ def explore_batched(
         # 2) Bayes-balanced mixing across models, per sequence.
         #    Shape notes: logit is [N, M, V]; weight is [N, M]; mixed is [N, V].
         logit = torch.stack(collected_logit, dim=1)  # [N, M, V]
-        weight = torch.softmax(-S, dim=1)  # [N, M]
+
+        # Target-biased Bayes-balanced mixing:
+        #   weight[i,k] proportional to target_k * exp(-S[i,k])
+        # Important subtlety: this biases each posterior trajectory toward `target`;
+        # it does not guarantee exact token-level mixture proportions.
+        weight = torch.softmax(torch.log(target)[None, :] - S, dim=1)  # [N, M]
+
         mixed = (weight.unsqueeze(-1) * logit).sum(dim=1)  # [N, V]
 
         # 3) Convert to probabilities (row-wise softmax), with non-finite safety.
