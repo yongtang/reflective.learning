@@ -95,9 +95,12 @@ class ContextEncoder:
 
     def encode_block_embed(self, block: torch.Tensor) -> torch.Tensor:
         with torch.inference_mode(), autocast():
-            value = torch.as_tensor(block).flatten()
+            value = torch.as_tensor(block)
+            assert (
+                value.shape[-1] <= self.dimension
+            ), f"block dimension overflow: {value.shape[-1]} > {self.dimension}"
             output = torch.nn.functional.pad(
-                value, (0, (-block.numel()) % self.dimension)
+                value, (0, (self.dimension - value.shape[-1]))
             ).view(-1, self.dimension)
             # CPU float32 output, consistent regardless of autocast
             return output.to("cpu", dtype=torch.float32)
