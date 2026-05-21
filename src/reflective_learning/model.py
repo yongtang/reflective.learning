@@ -42,7 +42,13 @@ class ReflectiveCore(nn.Module):
         self.d_model = d_model
 
         # Project one-hot token to d_model
-        self.input_linear = nn.Linear(vocab_size, d_model)
+        self.token_linear = nn.Linear(vocab_size, d_model)
+
+        # Project prefix d_model to d_model
+        self.prefix_linear = nn.Sequential(
+            nn.LayerNorm(d_model),
+            nn.Linear(d_model, d_model),
+        )
 
         # Output logit over token vocabulary
         self.output_linear = nn.Linear(d_model, vocab_size)
@@ -74,13 +80,16 @@ class ReflectiveCore(nn.Module):
         D = self.d_model
 
         # One-hot encode token
-        value = F.one_hot(token, num_classes=V).float()  # [T, V]
+        token_value = F.one_hot(token, num_classes=V).float()  # [T, V]
 
-        # Input projection
-        value = self.input_linear(value)  # [T, D]
+        # Token projection
+        token_value = self.token_linear(token_value)  # [T, D]
 
-        # Prepend prefix
-        value = torch.cat([prefix, value], dim=0)  # [C+T, D]
+        # Prefix projection
+        prefix_value = self.prefix_linear(prefix)  # [C, D]
+
+        # Prefix projection [C, D] + Token projection [T, D]
+        value = torch.cat([prefix_value, token_value], dim=0)  # [C+T, D]
 
         # Add batch dimension
         value = value.unsqueeze(0)  # [1, C+T, D]
@@ -167,13 +176,14 @@ class ReflectiveCore(nn.Module):
             T = token.size(0)
             # Allow T == 0 for inference (batch) case; keep training assumption otherwise.
             if T == 0:
-                value = token.new_zeros((0, V)).float()  # [0, V]
-                value = self.input_linear(value)  # [0, D]
+                token_value = token.new_zeros((0, V)).float()  # [0, V]
+                token_value = self.token_linear(token_value)  # [0, D]
             else:
-                value = F.one_hot(token, num_classes=V).float()  # [T, V]
-                value = self.input_linear(value)  # [T, D]
+                token_value = F.one_hot(token, num_classes=V).float()  # [T, V]
+                token_value = self.token_linear(token_value)  # [T, D]
+            prefix_value = self.prefix_linear(prefix)  # [C, D]
 
-            value = torch.cat([prefix, value], dim=0)  # [C + T, D]
+            value = torch.cat([prefix_value, token_value], dim=0)  # [C + T, D]
 
             embed_list.append(value)
             token_list.append(
