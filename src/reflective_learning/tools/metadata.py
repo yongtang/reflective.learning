@@ -425,18 +425,21 @@ def load(file, *selection):
     return [info] + [f_model(info, model[choice]) for choice in selection]
 
 
-def save(file, max, vocab, meta):
+def save(file, max, vocab, param, meta):
+
     info = {
         "max": max,
         "vocab": vocab,
         "layer": {
-            "d_model": 1152,
-            "nhead": 12,
-            "dim_feedforward": 4608,
-            "dropout": 0.1,
+            "d_model": (param if param is not None else {}).get("d_model", 768),
+            "nhead": (param if param is not None else {}).get("nhead", 12),
+            "dim_feedforward": (param if param is not None else {}).get(
+                "dim_feedforward", 3072
+            ),
+            "dropout": (param if param is not None else {}).get("dropout", 0.1),
         },
         "decoder": {
-            "num_layers": 12,
+            "num_layers": (param if param is not None else {}).get("num_layers", 12),
         },
         "context": {
             "text": {
@@ -449,13 +452,25 @@ def save(file, max, vocab, meta):
             },
             "transformers": "5.1.0",
         },
-        "meta": meta,
+        "meta": ({} if meta is None else meta),
     }
+
+    models = {choice: f_model(info, None) for choice in state_space}
 
     torch.save(
         {
             "info": info,
-            **{choice: f_model(info, None).state_dict() for choice in state_space},
+            **{choice: model.state_dict() for choice, model in models.items()},
         },
         file,
+    )
+    print(
+        "Save model: {}".format(
+            ", ".join(
+                "{} ({:,} parameters)".format(
+                    choice, sum(p.numel() for p in model.parameters())
+                )
+                for choice, model in models.items()
+            )
+        )
     )
