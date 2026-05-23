@@ -39,7 +39,8 @@ def test_reflective_transformer_forward_and_loss():
     x = torch.nn.functional.one_hot(
         input, num_classes=vocab_size
     ).float()  # [B, T-1, V]
-    x = model.input_linear(x)  # [B, T-1, D]
+    x = model.token_linear(x)  # [B, T-1, D]
+    prefix = model.prefix_linear(prefix)  # [B, C, D]
     embed = torch.cat([prefix, x], dim=1)  # [B, C+T-1, D]
     mask = torch.ones(embed.shape[:2], dtype=torch.bool)  # [B, C+T-1]
 

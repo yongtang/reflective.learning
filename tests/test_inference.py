@@ -1,7 +1,7 @@
 import torch
 
-from src.reflective_learning.inference import sequence
-from src.reflective_learning.model import ReflectiveCore
+from reflective_learning.inference import sequence
+from reflective_learning.model import ReflectiveCore
 
 
 def make_dummy_model():

@@ -112,7 +112,7 @@ def sequence_batched(
         This ensures the batched outputs are identical to running the non-batched `sequence(...)`
         per prefix, and prevents post-STOP drift. We do not skip computation for stopped rows; we
         simply constrain their probabilities.
-      - Each sampled token is also projected to an embedding with `input_linear` and written into
+      - Each sampled token is also projected to an embedding with `token_linear` and written into
         the per-model `embed` buffers at the just-filled absolute `position = index + T`, and the
         corresponding `mask` bit is set True so the token is visible next step.
       - Early termination: if *all* rows have STOPped at least once, we exit the loop.
@@ -120,8 +120,9 @@ def sequence_batched(
     Efficiency / allocation:
       - `collate()` is called **exactly once per sub-model** at T==0 with empty tokens (T==0), which
         pads and returns prefix-only embeddings: `embed: [N, Cpad, D]`, `mask: [N, Cpad]`, and
-        `index: [N]` where `index[i] == C_i`. We then **extend** those tensors on the RIGHT with
-        zeros to allow writing up to `maximum` new tokens in-place: shapes become
+        `index: [N]` where `index[i] == C_i`. Prefix embeddings are projected there by
+        `prefix_linear`. We then **extend** those tensors on the RIGHT with zeros to allow writing
+        up to `maximum` new tokens in-place: shapes become
             embed: [N, Cpad + maximum, D], mask: [N, Cpad + maximum].
         No further collate calls or buffer reallocations occur during decoding.
 
@@ -275,9 +276,10 @@ def sequence_batched(
             V = collected[k]["V"]
 
             one_hot = torch.nn.functional.one_hot(predict, V).to(embed.dtype)  # [N, V]
-            projection = e.input_linear(one_hot)  # [N, D]
+            # Prefix was already projected by e.collate(item) at T==0; only newly sampled tokens are projected here.
+            token_value = e.token_linear(one_hot)  # [N, D]
             position = index + T  # just-written slot
-            embed[rows, position, :] = projection
+            embed[rows, position, :] = token_value
             mask[rows, position] = True
 
     # --- Finalization: truncate each sequence at its FIRST STOP (including STOP) ---
@@ -647,7 +649,7 @@ def explore_batched(
             break
 
         # 7) Write the new token embeddings into each model's preallocated buffers:
-        #    - Project sampled token IDs via that model's input_linear.
+        #    - Project sampled token IDs via that model's token_linear.
         #    - Write the projection at absolute slot (index + T).
         #    - Flip mask True at that slot so it becomes visible next step.
         for k in range(M):
@@ -658,9 +660,10 @@ def explore_batched(
             V = collected[k]["V"]
 
             one_hot = torch.nn.functional.one_hot(predict, V).to(embed.dtype)  # [N, V]
-            projection = e.input_linear(one_hot)  # [N, D]
+            # Prefix was already projected by e.collate(item) at T==0; only newly sampled tokens are projected here.
+            token_value = e.token_linear(one_hot)  # [N, D]
             position = index + T  # absolute token slot written this step
-            embed[rows, position, :] = projection
+            embed[rows, position, :] = token_value
             mask[rows, position] = True
 
     # --- Finalize: return each sequence truncated at its first STOP (including STOP) ---
