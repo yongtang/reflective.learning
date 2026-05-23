@@ -46,6 +46,10 @@ def test_train_sanity():
         dataset, batch_size=4, collate_fn=model.collate
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=20 / 4,
+    )
 
     tmpdir = tempfile.mkdtemp()
 
@@ -58,6 +62,7 @@ def test_train_sanity():
             model=model,
             loader=loader,
             optimizer=optimizer,
+            scheduler=scheduler,
             total=20,
             callback=f_callback,
             device=torch.device("cpu"),

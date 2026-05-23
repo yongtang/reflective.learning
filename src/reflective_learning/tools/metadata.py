@@ -266,11 +266,38 @@ def learn(
             shuffle=False,
             drop_last=False,
         )
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=lr,
+            betas=(0.9, 0.95),
+            weight_decay=0.01,
+        )
+
+        total_steps = max(1, (total + batch - 1) // batch)
+        warmup_steps = min(max(1, int(0.03 * total_steps)), total_steps - 1)
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[
+                torch.optim.lr_scheduler.LinearLR(
+                    optimizer,
+                    start_factor=0.01,
+                    end_factor=1.0,
+                    total_iters=warmup_steps,
+                ),
+                torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=total_steps - warmup_steps,
+                ),
+            ],
+            milestones=[warmup_steps],
+        )
+
         train(
             model=model,
             loader=loader,
             optimizer=optimizer,
+            scheduler=scheduler,
             total=total,
             callback=functools.partial(
                 callback,

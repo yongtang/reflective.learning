@@ -117,6 +117,7 @@ def train(
     model,
     loader,
     optimizer,
+    scheduler,
     total,
     callback,
     device,
@@ -130,6 +131,7 @@ def train(
         model: The ReflectiveCore model to train.
         loader: A torch DataLoader yielding training batches.
         optimizer: Optimizer for updating model parameters.
+        scheduler: Learning-rate scheduler. If None, uses a flat scheduler.
         total: Total number of training samples to process.
         callback: A function called periodically during training.
         device: Device for this rank (required). Model is assumed already on this device
@@ -137,6 +139,16 @@ def train(
         rank: Global rank used only to disable tqdm on nonzero ranks.
         desc: Description for tqdm.
     """
+
+    scheduler = (
+        torch.optim.lr_scheduler.ConstantLR(
+            optimizer,
+            factor=1.0,
+            total_iters=1,
+        )
+        if scheduler is None
+        else scheduler
+    )
 
     loss_width = 10
     sample_width = len(str(total))
@@ -190,6 +202,7 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
+            scheduler.step()
 
             # Progress tracking (safe to call on all ranks; disabled bars ignore updates)
             count += batch_size
