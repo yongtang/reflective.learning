@@ -114,6 +114,8 @@ class ReflectiveCore(nn.Module):
         """
         B, T, D = embed.shape
 
+        assert T <= self.pos_embedding.num_embeddings
+
         # Positional embedding
         pos = (
             torch.arange(T, device=embed.device, dtype=torch.long)
