@@ -449,7 +449,11 @@ def dataset(file):
 def load(file, *selection):
     model = torch.load(file, map_location="cpu", weights_only=False)
     info = model["info"]
-    return [info] + [f_model(info, model[choice]) for choice in selection]
+    return (
+        ([info] + [f_model(info, model[choice]) for choice in selection])
+        if selection
+        else info
+    )
 
 
 def save(file, max, vocab, param, meta):
