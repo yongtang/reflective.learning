@@ -150,8 +150,20 @@ def train(
         else scheduler
     )
 
+    collected = torch.tensor(
+        [total, 0],
+        device=device,
+        dtype=torch.long,
+    )
+
+    if torch.distributed.is_initialized():
+        torch.distributed.all_reduce(
+            collected,
+            op=torch.distributed.ReduceOp.SUM,
+        )
+
     loss_width = 10
-    sample_width = len(str(total))
+    sample_width = len(str(int(collected[0].item())))
     bar_format = (
         f"{{desc}}: {{percentage:3.0f}}%|{{bar}}| "
         f"{{n:{sample_width}d}}/{{total:{sample_width}d}} "
@@ -161,7 +173,7 @@ def train(
     count = 0
 
     with tqdm(
-        total=total,
+        total=int(collected[0].item()),
         desc=desc,
         dynamic_ncols=True,
         bar_format=bar_format,
@@ -206,9 +218,22 @@ def train(
 
             # Progress tracking (safe to call on all ranks; disabled bars ignore updates)
             count += batch_size
-            progress.update(batch_size)
+
+            collected = torch.tensor(
+                [0, batch_size],
+                device=device,
+                dtype=torch.long,
+            )
+
+            if torch.distributed.is_initialized():
+                torch.distributed.all_reduce(
+                    collected,
+                    op=torch.distributed.ReduceOp.SUM,
+                )
+
+            progress.update(int(collected[1].item()))
             progress.set_postfix_str(
-                f"loss={loss_value:{loss_width}.5e}  samples={count:{sample_width}d}"
+                f"loss={loss_value:{loss_width}.5e}  samples={progress.n:{sample_width}d}"
             )
 
             if callback:
