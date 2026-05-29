@@ -1,18 +1,10 @@
-import collections
-import contextlib
-import functools
-import json
 import os
 import shutil
 import tempfile
 
-import numpy as np
 import torch
-from tqdm import tqdm
 
-from reflective_learning.encoder import ContextEncoder
 from reflective_learning.model import ReflectiveCore
-from reflective_learning.train import dpo, train
 
 
 def f_model(info, state):
@@ -41,6 +33,83 @@ def f_model(info, state):
     model.load_state_dict(state) if state else None
 
     return model
+
+
+def callback(
+    model_file,
+    callback_fn,
+    choice,
+    interval,
+    distributed,
+    model,
+    loss,
+    progress,
+    device,
+    rank,
+):
+    if rank != 0:
+        return
+    model = (
+        model.module
+        if (
+            distributed
+            and isinstance(
+                model,
+                (
+                    torch.nn.parallel.DataParallel,
+                    torch.nn.parallel.DistributedDataParallel,
+                    torch.distributed.fsdp.FullyShardedDataParallel,
+                ),
+            )
+        )
+        else model
+    )
+
+    if not hasattr(progress, "_meta_index_"):
+        progress._meta_index_ = 0
+
+    if not (
+        progress.n > progress._meta_index_ + interval or progress.n == progress.total
+    ):
+        return
+
+    # run callback_fn
+    if callback_fn:
+        callback_fn(model, loss, choice, progress, interval)
+
+    # keep copy of max_version = 3
+    max_version = 3
+    for i in reversed(range(1, max_version)):
+        src = f"{model_file}.{i:03d}"
+        dst = f"{model_file}.{i+1:03d}"
+        if os.path.exists(src):
+            shutil.move(src, dst)
+
+    # model.pt => model_1.pt
+    shutil.move(
+        f"{model_file}",
+        f"{model_file}.{1:03d}",
+    )
+
+    save = torch.load(f"{model_file}.{1:03d}", map_location="cpu")
+    save[choice] = model.state_dict()
+
+    # save model
+    with tempfile.NamedTemporaryFile(
+        dir=os.path.dirname(model_file), prefix="model.", suffix=".pt", delete=False
+    ) as f:
+        torch.save(save, f)
+        f.flush()
+        os.fsync(f.fileno())
+        fname = f.name
+    os.replace(fname, f"{model_file}")
+
+    progress._meta_index_ += interval
+
+    if progress.n == progress.total:
+        return
+
+    return
 
 
 def load(file, *selection):
