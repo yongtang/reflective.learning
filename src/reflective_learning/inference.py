@@ -36,6 +36,7 @@ def sequence(
     model,
     reduce,
     prefix: torch.Tensor,  # [C, D]
+    sentinel: bool,
     maximum: int,
     device: torch.device,
     generator: torch.Generator | None = None,  # optional reproducibility
@@ -48,6 +49,7 @@ def sequence(
                call(token, prefix) -> logits[V].
         reduce: The function to summerize the logits from different models.
         prefix (Tensor): [C, D] prefix embedding.
+        sentinel: Whether to limit generated tokens by 0 (term) or maximum (length).
         maximum (int): Maximum number of tokens to generate.
         device (device): Device for computation.
 
@@ -71,7 +73,7 @@ def sequence(
             )
             token[length] = prediction.item()
 
-            if prediction.item() == 0:
+            if sentinel and prediction.item() == 0:
                 break
 
         return token[: length + 1]  # [T]
@@ -82,6 +84,7 @@ def sequence_batched(
     model,  # iterable of sub-models
     reduce,  # elementwise reducer: tuple(T_k) -> T_mixed  (works for [V] and [N, V])
     prefix: list[torch.Tensor],  # list length N, each [C_i, D]
+    sentinel: bool,
     maximum: int,
     device: torch.device,
     generator: torch.Generator | None = None,  # optional reproducibility
@@ -105,8 +108,9 @@ def sequence_batched(
         naturally supports both the non-batched case ([V]) and the batched case ([N, V]) with no
         code changes. The result `mixed` is [N, V].
       - We softmax per-row to obtain [N, V] probabilities, then sample one token id per row.
-      - STOP handling (id 0): once a row emits STOP at any step, all subsequent steps *force* that
-        row to predict STOP deterministically by turning its probability row into a delta at 0:
+      - STOP handling when sentinel is True (id 0): once a row emits STOP at any step, all subsequent
+        steps *force* that row to predict STOP deterministically by turning its probability row into a
+        delta at 0:
             prob[stopped] = 0
             prob[stopped, 0] = 1
         This ensures the batched outputs are identical to running the non-batched `sequence(...)`
@@ -115,7 +119,8 @@ def sequence_batched(
       - Each sampled token is also projected to an embedding with `token_linear` and written into
         the per-model `embed` buffers at the just-filled absolute `position = index + T`, and the
         corresponding `mask` bit is set True so the token is visible next step.
-      - Early termination: if *all* rows have STOPped at least once, we exit the loop.
+      - Early termination when sentinel is True: if *all* rows have STOPped at least once, we exit
+        the loop.
 
     Efficiency / allocation:
       - `collate()` is called **exactly once per sub-model** at T==0 with empty tokens (T==0), which
@@ -139,13 +144,14 @@ def sequence_batched(
                      lambda L: torch.stack(L, 0).mean(0)
                      lambda L: (torch.stack(L, 0) * weight[:, None]).sum(0)
         prefix:  Python list of N FloatTensor prefixes; item i is [C_i, D] for sequence i.
+        sentinel: Whether to limit generated tokens by 0 (term) or maximum (length).
         maximum: Maximum number of tokens to generate for each sequence.
         device:  Computation device.
         generator: Optional torch.Generator for reproducible sampling.
 
     Returns:
         final:   List of N LongTensors. Each entry i is [T_i] (T_i <= maximum) and includes STOP (0)
-                 if STOP was sampled; sequences are truncated at the FIRST STOP.
+                 if sentinel is True and STOP was sampled; sequences are truncated at the FIRST STOP.
     """
     # Materialize `model` in case it's a generator; keep naming consistent with non-batched code.
     model = list(model)
@@ -162,7 +168,7 @@ def sequence_batched(
     # Per-sequence generation state:
     #   token[i, t] = sampled token id at time t for row i.
     #   length[i]   = number of tokens generated so far for row i.
-    #   stopped[i]  = True once STOP has been sampled for row i (we then force STOP in later steps).
+    #   stopped[i]  = True once STOP has been sampled for row i when sentinel is True.
     token = torch.empty((N, maximum), dtype=torch.long, device=device)
     length = torch.zeros(N, dtype=torch.long, device=device)
     stopped = torch.zeros(N, dtype=torch.bool, device=device)
@@ -247,10 +253,10 @@ def sequence_batched(
             prob = prob.clone()
             prob[~finite] = torch.full((V,), 1.0 / V, device=device, dtype=prob.dtype)
 
-        # 4) STOP forcing rule:
+        # 4) STOP forcing rule when sentinel is True:
         #    Rows that have already produced STOP are forced to predict STOP again by
         #    turning their probability rows into a delta at index 0.
-        if stopped.any():
+        if sentinel and stopped.any():
             V = prob.size(1)
             prob = prob.clone()
             prob[stopped] = 0
@@ -262,9 +268,10 @@ def sequence_batched(
         length = length + 1
 
         # Mark rows that just emitted STOP; if all STOPped, terminate.
-        stopped = stopped | (predict == 0)
-        if stopped.all():
-            break
+        if sentinel:
+            stopped = stopped | (predict == 0)
+            if stopped.all():
+                break
 
         # 6) Write the new token embeddings into each model’s buffers at absolute `position = index + T`,
         #    and flip mask True so it becomes visible at the next step.
@@ -282,14 +289,15 @@ def sequence_batched(
             embed[rows, position, :] = token_value
             mask[rows, position] = True
 
-    # --- Finalization: truncate each sequence at its FIRST STOP (including STOP) ---
+    # --- Finalization: truncate each sequence at its FIRST STOP (including STOP) when sentinel is True ---
     final = []
     for i in range(N):
         T = int(length[i].item())
         seq = token[i, :T]
-        position = (seq == 0).nonzero(as_tuple=False)
-        if position.numel() > 0:
-            seq = seq[: position[0, 0] + 1]
+        if sentinel:
+            position = (seq == 0).nonzero(as_tuple=False)
+            if position.numel() > 0:
+                seq = seq[: position[0, 0] + 1]
         final.append(seq.clone())
 
     return final
@@ -337,6 +345,7 @@ def explore_step(model, prefix, token, length, S, target, device, generator):
 def explore(
     model,
     prefix: torch.Tensor,  # [C, D]
+    sentinel: bool,
     maximum: int,
     device: torch.device,
     target: torch.Tensor | None = None,  # [M]
@@ -360,13 +369,14 @@ def explore(
       - Predict next token from a single softmax over the convex combination of per-model logits:
             probs = softmax( sum_k weight_k * logit_k )
       - Update S_k by adding the log-probability that each model k assigned to the sampled token.
-      - Stop early if the sampled token equals 0 (assumed STOP token).
+      - Stop early if sentinel is True and the sampled token equals 0 (assumed STOP token).
 
     Notes:
       - Sampling is stochastic via torch.multinomial, not greedy.
       - We only ever query each model individually for next-token logits; the balancing happens
         purely in how we combine those logits each step.
-      - The returned sequence will include the STOP token (0) if it is generated before `maximum`.
+      - The returned sequence will include the STOP token (0) if sentinel is True and it is
+        generated before `maximum`.
       - Important subtlety: this biases the posterior trajectory toward `target`;
         it does not guarantee exact token-level mixture proportions.
 
@@ -374,13 +384,15 @@ def explore(
         model: Iterable container of trained sub-models (one per label), each exposing
                call(token, prefix) -> logits[V].
         prefix (Tensor): [C, D] fixed prefix embedding for this sequence.
+        sentinel: Whether to limit generated tokens by 0 (term) or maximum (length).
         maximum (int): Maximum number of tokens to generate (upper bound).
         device (device): Device for computation.
         target (Tensor | None): [M] target mixture distribution over models.
                                 Defaults to uniform if None.
 
     Returns:
-        Tensor: [T] of generated token indices (T <= maximum), possibly including STOP (0).
+        Tensor: [T] of generated token indices (T <= maximum), possibly including STOP (0)
+                when sentinel is True.
     """
     # materialize in case it's a generator; keep name 'model'
     model = list(model)
@@ -411,8 +423,8 @@ def explore(
 
             token[length] = prediction.item()
 
-            # Early stop on STOP token (assumed id 0).
-            if prediction.item() == 0:
+            # Early stop on STOP token (assumed id 0) when sentinel is True.
+            if sentinel and prediction.item() == 0:
                 break
 
         return token[: length + 1]
@@ -422,6 +434,7 @@ def explore(
 def explore_batched(
     model,  # iterable of sub-models
     prefix: list[torch.Tensor],  # list length N, each [C_i, D]
+    sentinel: bool,
     maximum: int,
     device: torch.device,
     target: torch.Tensor | None = None,  # [M]
@@ -447,10 +460,10 @@ def explore_batched(
             probs[i] = softmax( sum_k weight[i,k] * logit[i,k] )
       - Update S[i, k] by adding the log-probability model k assigned to the actually
         sampled token for sequence i.
-      - Stop early for any sequence that samples STOP (token id 0). In this batched
-        version, once a sequence hits STOP, we *force* it to keep predicting STOP on
-        later steps so outputs remain identical to independent decoding and to avoid
-        post-STOP drift.
+      - Stop early for any sequence that samples STOP (token id 0) when sentinel is
+        True. In this batched version, once a sequence hits STOP, we *force* it to
+        keep predicting STOP on later steps so outputs remain identical to independent
+        decoding and to avoid post-STOP drift.
 
     Batched implementation details:
       - Variable-length prefixes: we call `collate()` once per sub-model at T==0 with
@@ -470,8 +483,8 @@ def explore_batched(
              `length[i]` is how many tokens we’ve already generated for row i.
           2) Stack the per-model last-position logits to [N, M, V], Bayes-mix across
              models per row, softmax → [N, V] per-row distributions.
-          3) **STOP forcing:** rows that have already produced STOP have their
-             distribution forced to a delta at 0:
+          3) **STOP forcing when sentinel is True:** rows that have already produced
+             STOP have their distribution forced to a delta at 0:
                  prob[stopped] = 0
                  prob[stopped, 0] = 1
              so they deterministically keep sampling STOP. We also freeze their S
@@ -479,8 +492,10 @@ def explore_batched(
           4) Sample one token per sequence, write it to the per-row token buffer
              and also project/write its embedding into every model’s preallocated
              `embed` at the just-written position (and flip the mask bit True).
-          5) If *all* rows have produced STOP at least once, terminate.
-      - Finally, each returned sequence is truncated at its first STOP (including STOP).
+          5) If sentinel is True and *all* rows have produced STOP at least once,
+             terminate.
+      - Finally, each returned sequence is truncated at its first STOP (including STOP)
+        when sentinel is True.
 
     Safety notes:
       - If any row’s mixed logits are non-finite in a step, we replace that row’s
@@ -495,6 +510,7 @@ def explore_batched(
         model:   Iterable container of trained sub-models (one per label), each exposing
                  call(token, prefix) -> logits[V] and forward(mask, embed) -> [B, T, V].
         prefix:  Python list of N FloatTensor prefixes; item i is [C_i, D] for sequence i.
+        sentinel: Whether to limit generated tokens by 0 (term) or maximum (length).
         maximum: Maximum number of tokens to generate (upper bound for each sequence).
         device:  Computation device.
         target (Tensor | None): [M] target mixture distribution over models.
@@ -503,7 +519,8 @@ def explore_batched(
 
     Returns:
         final:   List of N LongTensors. Each entry is [T_i] with tokens up to and
-                 including the first STOP (0), or up to `maximum` if STOP never sampled.
+                 including the first STOP (0) when sentinel is True, or up to `maximum`
+                 if sentinel is False or STOP never sampled.
     """
     # Materialize in case `model` is a generator; keep the name `model` (like single version).
     model = list(model)
@@ -528,7 +545,7 @@ def explore_batched(
     #   length[i]   holds how many tokens have been generated for sequence i so far.
     #   S[i, k]     holds the cumulative log-likelihood assigned by model k to
     #               the tokens sampled for sequence i.
-    #   stopped[i]  flags that sequence i has emitted STOP at least once.
+    #   stopped[i]  flags that sequence i has emitted STOP at least once when sentinel is True.
     token = torch.empty((N, maximum), dtype=torch.long, device=device)
     length = torch.zeros(N, dtype=torch.long, device=device)
     S = torch.zeros((N, M), device=device)
@@ -617,13 +634,13 @@ def explore_batched(
             prob = prob.clone()
             prob[~finite] = torch.full((V,), 1.0 / V, device=device, dtype=prob.dtype)
 
-        # --- STOP forcing rule (post-STOP determinism) ---
+        # --- STOP forcing rule (post-STOP determinism) when sentinel is True ---
         # Rows that have already STOPped are *forced* to predict STOP again by turning
         # their distribution into a delta at 0. This keeps behavior identical to
         # independent decoding and prevents post-STOP randomness:
         #   prob[stopped] = 0
         #   prob[stopped, 0] = 1
-        if stopped.any():
+        if sentinel and stopped.any():
             V = prob.size(1)
             prob = prob.clone()
             prob[stopped] = 0
@@ -639,14 +656,15 @@ def explore_batched(
         logp = torch.log_softmax(logit, dim=-1)  # [N, M, V]
         logp_index = predict.view(N, 1, 1).expand(N, M, 1)  # [N, M, 1]
         logp_k = logp.gather(2, logp_index).squeeze(2)  # [N, M]
-        if stopped.any():
+        if sentinel and stopped.any():
             logp_k[stopped] = 0
         S = S + torch.clamp(logp_k, min=-30.0)
 
         # 6) Mark rows that just emitted STOP; if all have STOPped, terminate.
-        stopped = stopped | (predict == 0)
-        if stopped.all():
-            break
+        if sentinel:
+            stopped = stopped | (predict == 0)
+            if stopped.all():
+                break
 
         # 7) Write the new token embeddings into each model's preallocated buffers:
         #    - Project sampled token IDs via that model's token_linear.
@@ -666,14 +684,15 @@ def explore_batched(
             embed[rows, position, :] = token_value
             mask[rows, position] = True
 
-    # --- Finalize: return each sequence truncated at its first STOP (including STOP) ---
+    # --- Finalize: return each sequence truncated at its first STOP when sentinel is True ---
     final = []
     for i in range(N):
         T = int(length[i].item())
         seq = token[i, :T]
-        position = (seq == 0).nonzero(as_tuple=False)
-        if position.numel() > 0:
-            seq = seq[: position[0, 0] + 1]
+        if sentinel:
+            position = (seq == 0).nonzero(as_tuple=False)
+            if position.numel() > 0:
+                seq = seq[: position[0, 0] + 1]
         final.append(seq.clone())
 
     return final

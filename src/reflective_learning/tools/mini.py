@@ -550,6 +550,7 @@ def run_explore(target, data, image, total, batch, device):
             return explore_batched(
                 model=model,
                 prefix=prefix,
+                sentinel=True,
                 maximum=info["max"],
                 device=device,
             )
@@ -557,6 +558,7 @@ def run_explore(target, data, image, total, batch, device):
             return explore(
                 model=model,
                 prefix=prefix,
+                sentinel=True,
                 maximum=info["max"],
                 device=device,
             )
@@ -751,6 +753,7 @@ def run_play(goal, start, facing, model, total, batch, device):
                 model=model,
                 reduce=lambda logit: logit[0] - logit[1],  # success - failure
                 prefix=prefix,
+                sentinel=True,
                 maximum=info["max"],
                 device=device,
             )
@@ -759,6 +762,7 @@ def run_play(goal, start, facing, model, total, batch, device):
                 model=model,
                 reduce=lambda logit: logit[0] - logit[1],  # success - failure
                 prefix=prefix,
+                sentinel=True,
                 maximum=info["max"],
                 device=device,
             )

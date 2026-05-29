@@ -31,6 +31,7 @@ def test_sequence():
         model=[model],
         reduce=lambda logit: logit[0],
         prefix=prefix,
+        sentinel=True,
         maximum=maximum,
         device="cpu",
     )
@@ -43,3 +44,21 @@ def test_sequence():
         assert (tokens == 0).nonzero(as_tuple=False)[0].item() < maximum
     else:
         assert tokens.shape[0] <= maximum
+
+
+def test_sequence_without_sentinel():
+    model = make_dummy_model()
+    prefix = torch.randn(4, 16)
+    maximum = 10
+
+    tokens = sequence(
+        model=[model],
+        reduce=lambda logit: logit[0],
+        prefix=prefix,
+        sentinel=False,
+        maximum=maximum,
+        device="cpu",
+    )
+
+    assert isinstance(tokens, torch.Tensor)
+    assert tokens.shape[0] == maximum
