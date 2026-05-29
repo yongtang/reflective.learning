@@ -25,6 +25,7 @@ from reflective_learning.inference import (
 from reflective_learning.launch import launch
 from reflective_learning.tools import metadata
 
+state_space = ["success", "failure"]
 action_space = [
     minigrid.core.actions.Actions.done,
     minigrid.core.actions.Actions.left,
@@ -287,7 +288,7 @@ def run_seed(env_size, max_steps, num_seeds, save_seed):
             while True:
                 steps = random.randint(1, max_steps)
                 goal, start, facing, action = f_observation(env_size, steps=steps)
-                if index % len(metadata.state_space) != 0:
+                if index % len(state_space) != 0:
                     goal = (
                         random.randint(1, env_size - 2),
                         random.randint(1, env_size - 2),
@@ -376,13 +377,13 @@ def run_spin(seed, data, image, max_steps):
     assert len(entries) == total
 
     os.makedirs(data, exist_ok=True)
-    statistics = {choice: 0 for choice in metadata.state_space}
+    statistics = {choice: 0 for choice in state_space}
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
                 open(os.path.join(data, f"seed.{choice}.data"), "w")
             )
-            for choice in metadata.state_space
+            for choice in state_space
         }
 
         def fn_statistics(index):
@@ -399,7 +400,7 @@ def run_spin(seed, data, image, max_steps):
         + "["
         + ", ".join(
             f"{choice}:{statistics[choice]} ({os.path.join(data, f'seed.{choice}.data')})"
-            for choice in metadata.state_space
+            for choice in state_space
         )
         + "]"
     )
@@ -408,6 +409,7 @@ def run_spin(seed, data, image, max_steps):
         file=os.path.join(data, f"model.pt"),
         max=max_steps,
         vocab=vocab,
+        space=state_space,
         meta={"env": env_size},
     )
 
@@ -483,13 +485,13 @@ def run_learn(choice, data, image, total, batch, interval, lr, device, distribut
 def run_explore(target, data, image, total, batch, device):
     print(f"Load model: {os.path.join(data, f'model.pt')}")
 
-    info, *model = metadata.load(os.path.join(data, f"model.pt"), *metadata.state_space)
+    info, *model = metadata.load(os.path.join(data, f"model.pt"), *state_space)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 
     encoder = ContextEncoder.from_pretrained(info, device=device)
 
-    for choice in metadata.state_space:
+    for choice in state_space:
         if os.path.isfile(os.path.join(data, f"data.{choice}.data")):
             entries = sorted(
                 os.path.basename(e)
@@ -595,13 +597,13 @@ def run_explore(target, data, image, total, batch, device):
     )
     assert len(entries) == total
 
-    statistics = {choice: 0 for choice in metadata.state_space}
+    statistics = {choice: 0 for choice in state_space}
     with contextlib.ExitStack() as stack:
         f = {
             choice: stack.enter_context(
                 open(os.path.join(data, f"data.{choice}.data"), "w")
             )
-            for choice in metadata.state_space
+            for choice in state_space
         }
 
         def fn_statistics(index):
@@ -618,7 +620,7 @@ def run_explore(target, data, image, total, batch, device):
         + "["
         + ", ".join(
             f"{choice}:{statistics[choice]} ({os.path.join(data, f'data.{choice}.data')})"
-            for choice in metadata.state_space
+            for choice in state_space
         )
         + "]"
     )
@@ -716,7 +718,7 @@ def run_finetune(data, image, total, batch, interval, lr, device, distributed):
 def run_play(goal, start, facing, model, total, batch, device):
     print(f"Load model: {model}")
 
-    info, *model = metadata.load(model, *metadata.state_space)
+    info, *model = metadata.load(model, *state_space)
 
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
 

@@ -43,9 +43,6 @@ def f_model(info, state):
     return model
 
 
-state_space = ["success", "failure"]
-
-
 class LearnDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, datum_fn):
         super().__init__()
@@ -233,7 +230,7 @@ def learn(
         datum_fn=functools.partial(
             datum_fn,
             vocab_fn=lambda e: info["vocab"][e],
-            state_fn=lambda e: state_space.index(e),
+            state_fn=lambda e: info["state"].index(e),
             max_steps=info["max"],
             encoder=encoder,
         ),
@@ -338,7 +335,7 @@ def finetune(
         datum_fn=functools.partial(
             datum_fn,
             vocab_fn=lambda e: info["vocab"][e],
-            state_fn=lambda e: state_space.index(e),
+            state_fn=lambda e: info["state"].index(e),
             max_steps=info["max"],
             encoder=encoder,
         ),
@@ -456,11 +453,12 @@ def load(file, *selection):
     )
 
 
-def save(file, max, vocab, param, meta):
+def save(file, max, vocab, state, param, meta):
 
     info = {
         "max": max,
         "vocab": vocab,
+        "state": state,
         "layer": {
             "d_model": (param if param is not None else {}).get("d_model", 768),
             "nhead": (param if param is not None else {}).get("nhead", 12),
@@ -486,7 +484,7 @@ def save(file, max, vocab, param, meta):
         "meta": ({} if meta is None else meta),
     }
 
-    models = {choice: f_model(info, None) for choice in state_space}
+    models = {choice: f_model(info, None) for choice in info["state"]}
 
     torch.save(
         {
